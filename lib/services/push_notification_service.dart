@@ -68,9 +68,11 @@ class PushNotificationService {
     FirebaseMessaging.onMessage.listen((RemoteMessage message) {
       final notification = message.notification;
       final android = message.notification?.android;
+      final senderId = message.data['sender_id'] as String?;
+      final notifId = senderId != null ? notificationIdForSender(senderId) : notification.hashCode;
       if (notification != null && android != null) {
         _localNotifications.show(
-          notification.hashCode,
+          notifId,
           notification.title,
           notification.body,
           NotificationDetails(
@@ -81,6 +83,7 @@ class PushNotificationService {
               importance: Importance.high,
               priority: Priority.high,
               icon: '@mipmap/ic_launcher',
+              tag: senderId != null ? 'sender_$senderId' : null,
             ),
           ),
         );
@@ -94,6 +97,39 @@ class PushNotificationService {
     messaging.onTokenRefresh.listen((newToken) {
       unawaited(KaSpotService.registerFcmToken(newToken));
     });
+  }
+
+  /// Calculates a stable 31-bit non-negative notification ID for a sender.
+  static int notificationIdForSender(String senderId) {
+    return senderId.hashCode.abs() % 2147483647;
+  }
+
+  /// Returns the Android notification tag used when posting a notification
+  /// for [senderId]. Must match the tag passed to cancel() — Android requires
+  /// the same (id, tag) pair that was used when posting.
+  static String _tagForSender(String senderId) => 'sender_$senderId';
+
+  /// Clears OS notification tray items associated with [senderId].
+  ///
+  /// Android requires the same (id, tag) pair that was used when posting the
+  /// notification. Without the tag, `cancel(id)` silently does nothing on
+  /// Android 21+ when the notification was posted with a non-null tag.
+  static Future<void> clearNotificationsForSender(String senderId) async {
+    try {
+      final notifId = notificationIdForSender(senderId);
+      await _localNotifications.cancel(notifId, tag: _tagForSender(senderId));
+    } catch (e) {
+      debugPrint('[PushNotificationService] Failed to cancel notification for sender $senderId: $e');
+    }
+  }
+
+  /// Clears all local notifications currently in the tray.
+  static Future<void> clearAll() async {
+    try {
+      await _localNotifications.cancelAll();
+    } catch (e) {
+      debugPrint('[PushNotificationService] Failed to clear all notifications: $e');
+    }
   }
 
   static Future<void> _registerToken() async {

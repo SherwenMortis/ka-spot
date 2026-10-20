@@ -119,6 +119,7 @@ Deno.serve(async (req: Request) => {
                   channel_id: 'kaspot_messages',
                   sound: 'default',
                   click_action: 'FLUTTER_NOTIFICATION_CLICK',
+                  tag: `sender_${sender_id}`,
                 },
               },
               data: {

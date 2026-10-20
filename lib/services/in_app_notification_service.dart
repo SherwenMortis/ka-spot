@@ -11,6 +11,7 @@ class InAppNotificationPayload {
   final String body;
   final String? avatarUrl;
   final String? relationship;
+  final String? senderId;
   final VoidCallback? onTap;
   final DateTime timestamp;
 
@@ -21,6 +22,7 @@ class InAppNotificationPayload {
     required this.body,
     this.avatarUrl,
     this.relationship,
+    this.senderId,
     this.onTap,
     DateTime? timestamp,
   }) : timestamp = timestamp ?? DateTime.now();
@@ -49,6 +51,14 @@ class InAppNotificationService {
     _dismissTimer?.cancel();
     _dismissTimer = null;
     activeNotification.value = null;
+  }
+
+  /// Dismisses any active in-app banner for [senderId].
+  static void dismissForSender(String senderId) {
+    final active = activeNotification.value;
+    if (active != null && (active.senderId == senderId || active.id.contains(senderId))) {
+      dismiss();
+    }
   }
 
   /// Evaluates member coordinates against saved places and fires an in-app

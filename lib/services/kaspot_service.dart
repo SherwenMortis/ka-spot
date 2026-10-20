@@ -1139,6 +1139,22 @@ class KaSpotService {
   // In-Circle Chat Messaging
   static final List<Map<String, dynamic>> _localMessages = [];
 
+  /// Exposed for regression tests only. Do not use in production code.
+  @visibleForTesting
+  static List<Map<String, dynamic>> get debugLocalMessages => _localMessages;
+
+  /// Exposed for regression tests only. Do not use in production code.
+  @visibleForTesting
+  static List<Map<String, dynamic>> get debugLocalRequests => _localRequests;
+
+  /// Exposed for regression tests only. Do not use in production code.
+  @visibleForTesting
+  static List<Map<String, dynamic>> get debugLocalConnections => _localConnections;
+
+  /// User ID of the active chat conversation currently open in the foreground.
+  /// When set, in-app banners and redundant unread increments are suppressed for this sender.
+  static String? activeChatUserId;
+
   /// Global unread-message counts keyed by sender id.
   /// Updated by HomeShell's Realtime subscription and cleared when the
   /// recipient opens a conversation. Widgets listen via [unreadCounts].
@@ -1153,16 +1169,23 @@ class KaSpotService {
   }
 
   /// Clears the unread counter for [senderId] and marks their messages as read
-  /// in the database so the count stays at zero after a hot-restart too.
+  /// in the database (and in-memory test store) so the count stays at zero.
   static Future<void> markMessagesRead(String senderId) async {
     final current = Map<String, int>.from(unreadCounts.value);
     current.remove(senderId);
     unreadCounts.value = current;
 
+    final nowIso = DateTime.now().toUtc().toIso8601String();
+    for (final m in _localMessages) {
+      if (m['sender_id'] == senderId && m['recipient_id'] == userId && m['read_at'] == null) {
+        m['read_at'] = nowIso;
+      }
+    }
+
     if (_client != null) {
       try {
         await _client!.from('circle_messages').update({
-          'read_at': DateTime.now().toUtc().toIso8601String(),
+          'read_at': nowIso,
         }).eq('sender_id', senderId).eq('recipient_id', userId).isFilter('read_at', null);
       } catch (e) {
         debugPrint('[KaSpot] markMessagesRead failed: $e');
@@ -1209,10 +1232,15 @@ class KaSpotService {
         .where((m) =>
             (m['sender_id'] == userId && m['recipient_id'] == otherUserId) ||
             (m['sender_id'] == otherUserId && m['recipient_id'] == userId))
+        .map((m) => Map<String, dynamic>.from(m))
         .toList();
   }
 
-  static Future<void> sendCircleMessage(String recipientId, String content) async {
+  static Future<void> sendCircleMessage(
+    String recipientId,
+    String content, {
+    String? replyToMessageId,
+  }) async {
     final cleanContent = content.trim();
     if (cleanContent.isEmpty) throw Exception('Message cannot be empty.');
     if (recipientId == userId) throw Exception('You cannot message yourself.');
@@ -1224,11 +1252,15 @@ class KaSpotService {
       // Failures (e.g. the connection was just removed) must surface to the
       // user: silently storing the message locally would fake a delivery the
       // other member never receives.
-      await _client!.from('circle_messages').insert({
+      final insertData = <String, dynamic>{
         'sender_id': userId,
         'recipient_id': recipientId,
         'content': cleanContent,
-      });
+      };
+      if (replyToMessageId != null && replyToMessageId.isNotEmpty) {
+        insertData['reply_to_message_id'] = replyToMessageId;
+      }
+      await _client!.from('circle_messages').insert(insertData);
       return;
     }
     _localMessages.add({
@@ -1236,7 +1268,10 @@ class KaSpotService {
       'sender_id': userId,
       'recipient_id': recipientId,
       'content': cleanContent,
+      if (replyToMessageId != null && replyToMessageId.isNotEmpty)
+        'reply_to_message_id': replyToMessageId,
       'created_at': DateTime.now().toUtc().toIso8601String(),
+      'read_at': null,
     });
   }
 }

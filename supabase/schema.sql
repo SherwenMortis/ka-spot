@@ -313,7 +313,9 @@ create table if not exists public.circle_messages (
   created_at timestamptz not null default now(),
   -- Nullable: set by the recipient when they open the conversation.
   -- Used to drive unread-message badges without a separate counter table.
-  read_at timestamptz default null
+  read_at timestamptz default null,
+  -- Nullable: references a prior message in the same conversation being replied to.
+  reply_to_message_id uuid references public.circle_messages(id) on delete set null
 );
 
 alter table public.circle_messages enable row level security;
@@ -325,18 +327,46 @@ using (
   and public.is_accepted_connection(sender_id, recipient_id)
 );
 
+-- Helper used by the INSERT policy to validate reply_to_message_id without
+-- triggering infinite recursion (an inline subquery on circle_messages inside
+-- an RLS policy on circle_messages causes a recursive policy evaluation loop).
+-- security definer bypasses RLS for this read, breaking the cycle safely.
+create or replace function public.is_valid_reply(
+  reply_id uuid,
+  sender   uuid,
+  recip    uuid
+)
+returns boolean language sql stable security definer set search_path = '' as $$
+  select exists (
+    select 1 from public.circle_messages m
+    where m.id = reply_id
+      and (
+        (m.sender_id = sender and m.recipient_id = recip)
+        or (m.sender_id = recip  and m.recipient_id = sender)
+      )
+  );
+$$;
+revoke all on function public.is_valid_reply(uuid, uuid, uuid) from public;
+grant execute on function public.is_valid_reply(uuid, uuid, uuid) to authenticated;
+
 drop policy if exists circle_messages_sender_create on public.circle_messages;
 create policy circle_messages_sender_create on public.circle_messages for insert to authenticated
 with check (
   sender_id = (select auth.uid())
   and public.is_accepted_connection(sender_id, recipient_id)
   and sender_id <> recipient_id
+  and (
+    reply_to_message_id is null
+    or public.is_valid_reply(reply_to_message_id, sender_id, recipient_id)
+  )
 );
 
 grant select, insert on public.circle_messages to authenticated;
 
--- Allow the column to be added to an existing table (safe to re-run: no-op if already present).
+-- Allow columns to be added to an existing table (safe to re-run: no-op if already present).
 alter table public.circle_messages add column if not exists read_at timestamptz default null;
+alter table public.circle_messages add column if not exists reply_to_message_id uuid references public.circle_messages(id) on delete set null;
+create index if not exists idx_circle_messages_reply_to on public.circle_messages (reply_to_message_id);
 
 -- Unread-badge support: the recipient may mark received messages as read.
 drop policy if exists circle_messages_recipient_mark_read on public.circle_messages;

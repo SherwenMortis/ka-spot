@@ -49,6 +49,10 @@ class _HomeShellState extends State<HomeShell> {
           final content = newRecord['content'] as String? ?? '';
           if (senderId == null || senderId == myId) return;
 
+          // If the user is currently viewing this conversation, the chat screen
+          // immediately displays it and marks it read. Suppress badge increment and banner.
+          if (KaSpotService.activeChatUserId == senderId) return;
+
           // Always increment the unread counter so badge stays accurate even
           // when the user is on a different tab or the in-app banner is missed.
           KaSpotService.incrementUnread(senderId);
@@ -72,6 +76,7 @@ class _HomeShellState extends State<HomeShell> {
             body: content,
             avatarUrl: avatar,
             relationship: rel,
+            senderId: senderId,
             onTap: () {
               Navigator.push(
                 context,

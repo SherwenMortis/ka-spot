@@ -70,8 +70,15 @@ client_secret*.json
 # Firebase service account key (contains private key — never commit)
 *firebase-adminsdk*.json
 
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+.vscode/
+supabase/.temp/
+
 # Firebase / Google platform config files (contain API keys)
 # These are placed in android/app/ and ios/Runner/ at build time.
 # Add them back explicitly if your CI pipeline needs them.
+*google-services*.json
 android/app/google-services.json
 ios/Runner/GoogleService-Info.plist

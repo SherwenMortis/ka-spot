@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 
 /// Renders the KaSpot Privacy Policy from the bundled HTML asset.
 /// Uses a WebView-style scrollable view via a simple HTML renderer.
