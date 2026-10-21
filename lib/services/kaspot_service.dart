@@ -1236,6 +1236,121 @@ class KaSpotService {
         .toList();
   }
 
+  // ── Message Reactions ───────────────────────────────────────────────────
+
+  /// In-memory reaction store for the local-preview path.
+  /// Structure: { messageId: [ { id, message_id, user_id, emoji, created_at, updated_at } ] }
+  static final Map<String, List<Map<String, dynamic>>> _localReactions = {};
+
+  /// Exposed for regression tests only.
+  @visibleForTesting
+  static Map<String, List<Map<String, dynamic>>> get debugLocalReactions =>
+      _localReactions;
+
+  /// Loads reactions for a list of message IDs in a single query.
+  /// Returns a map of messageId → list of reaction rows.
+  static Future<Map<String, List<Map<String, dynamic>>>> getReactionsForMessages(
+    List<String> messageIds,
+  ) async {
+    if (messageIds.isEmpty) return {};
+
+    // Strip temporary optimistic IDs that have no server record yet.
+    final stableIds =
+        messageIds.where((id) => !id.startsWith('temp-')).toList();
+    if (stableIds.isEmpty) return {};
+
+    if (_client != null) {
+      try {
+        final rows = await _client!
+            .from('message_reactions')
+            .select('id, message_id, user_id, emoji, created_at, updated_at')
+            .inFilter('message_id', stableIds);
+        final result = <String, List<Map<String, dynamic>>>{};
+        for (final row in rows) {
+          final mid = row['message_id'] as String;
+          result.putIfAbsent(mid, () => []);
+          result[mid]!.add(Map<String, dynamic>.from(row));
+        }
+        return result;
+      } catch (e) {
+        debugPrint('[KaSpot] getReactionsForMessages failed: $e');
+        return {};
+      }
+    }
+
+    // Local-preview path.
+    final result = <String, List<Map<String, dynamic>>>{};
+    for (final id in stableIds) {
+      result[id] = (_localReactions[id] ?? [])
+          .map((r) => Map<String, dynamic>.from(r))
+          .toList();
+    }
+    return result;
+  }
+
+  /// Adds or replaces the current user's reaction on [messageId].
+  /// Returns the confirmed reaction row.
+  static Future<void> upsertReaction(String messageId, String emoji) async {
+    final myId = userId;
+    if (myId.isEmpty) throw Exception('Not authenticated.');
+    if (messageId.startsWith('temp-')) {
+      throw Exception('Cannot react to a message that has not been saved yet.');
+    }
+
+    if (_client != null) {
+      await _client!.rpc('upsert_reaction', params: {
+        'p_message_id': messageId,
+        'p_emoji': emoji,
+      });
+      return;
+    }
+
+    // Local-preview path.
+    _localReactions.putIfAbsent(messageId, () => []);
+    final list = _localReactions[messageId]!;
+    final existing = list.indexWhere((r) => r['user_id'] == myId);
+    final now = DateTime.now().toUtc().toIso8601String();
+    if (existing >= 0) {
+      list[existing]['emoji'] = emoji;
+      list[existing]['updated_at'] = now;
+    } else {
+      final rxnSeq = _localSessionSeq++;
+      list.add({
+        'id': 'rxn-${DateTime.now().millisecondsSinceEpoch}-$rxnSeq',
+        'message_id': messageId,
+        'user_id': myId,
+        'emoji': emoji,
+        'created_at': now,
+        'updated_at': now,
+      });
+    }
+  }
+
+  /// Removes the current user's reaction from [messageId].
+  static Future<void> removeReaction(String messageId) async {
+    final myId = userId;
+    if (myId.isEmpty) throw Exception('Not authenticated.');
+
+    if (_client != null) {
+      try {
+        await _client!
+            .from('message_reactions')
+            .delete()
+            .eq('message_id', messageId)
+            .eq('user_id', myId);
+      } catch (e) {
+        debugPrint('[KaSpot] removeReaction failed: $e');
+        rethrow;
+      }
+      return;
+    }
+
+    // Local-preview path.
+    _localReactions[messageId]?.removeWhere((r) => r['user_id'] == myId);
+  }
+
+  // ── End Message Reactions ────────────────────────────────────────────────
+
   static Future<void> sendCircleMessage(
     String recipientId,
     String content, {
@@ -1263,8 +1378,12 @@ class KaSpotService {
       await _client!.from('circle_messages').insert(insertData);
       return;
     }
+    // Use a monotonically incrementing suffix so that messages seeded in
+    // rapid succession (e.g. inside Flutter widget tests with fake time) always
+    // receive distinct IDs even when millisecondsSinceEpoch doesn't advance.
+    final msgSeq = _localSessionSeq++;
     _localMessages.add({
-      'id': 'msg-${DateTime.now().millisecondsSinceEpoch}',
+      'id': 'msg-${DateTime.now().millisecondsSinceEpoch}-$msgSeq',
       'sender_id': userId,
       'recipient_id': recipientId,
       'content': cleanContent,
