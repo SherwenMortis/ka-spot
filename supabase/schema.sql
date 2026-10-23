@@ -1,4 +1,5 @@
--- KaSpot v1. Latest location only; no historical location trail.
+-- KaSpot v1. Latest location only; no historical location trail, and the one
+-- stored coordinate expires on its own after the retention window below.
 -- Apply using the Supabase SQL editor or Supabase CLI migrations.
 -- Safe to re-run: every statement is idempotent, so applying this script to
 -- an existing database upgrades it in place without resetting any data.
@@ -59,11 +60,24 @@ create table if not exists public.location_sharing (
   check (owner_id <> recipient_id)
 );
 
+-- Retention window for a stored coordinate, measured from the moment the server
+-- accepts a write. Kept in one function so the policy, the trigger and the app
+-- (lib/utils/location_tracking_config.dart) can be checked against a single
+-- number.
+create or replace function public.location_retention_interval()
+returns interval language sql stable security invoker set search_path = '' as $$
+  select interval '24 hours';
+$$;
+
+-- One row per user: the latest coordinate only, never a trail. received_at and
+-- expires_at are stamped by a server-side trigger, so they are not client input.
 create table if not exists public.locations (
   user_id uuid primary key references auth.users(id) on delete cascade,
   latitude double precision not null check (latitude between -90 and 90),
   longitude double precision not null check (longitude between -180 and 180),
-  recorded_at timestamptz not null default now()
+  recorded_at timestamptz not null default now(),
+  received_at timestamptz not null default now(),
+  expires_at timestamptz not null default (now() + public.location_retention_interval())
 );
 
 create table if not exists public.saved_places (
@@ -248,11 +262,11 @@ with check (user_id = (select auth.uid()) and exists (
 ));
 drop policy if exists locations_authorized_read on public.locations;
 create policy locations_authorized_read on public.locations for select to authenticated
-using (user_id = (select auth.uid()) or exists (
+using (expires_at > now() and (user_id = (select auth.uid()) or exists (
   select 1 from public.location_sharing s
   where s.owner_id = locations.user_id and s.recipient_id = (select auth.uid())
     and s.is_enabled and public.is_accepted_connection(s.owner_id, s.recipient_id)
-));
+)));
 drop policy if exists locations_owner_delete on public.locations;
 create policy locations_owner_delete on public.locations for delete to authenticated
 using (user_id = (select auth.uid()));
@@ -289,6 +303,12 @@ create table if not exists public.device_tokens (
   user_id     uuid not null references auth.users(id) on delete cascade,
   token       text not null,
   platform    text not null default 'android' check (platform in ('android', 'ios')),
+  -- True only for app builds that render data-only FCM messages themselves via
+  -- flutter_local_notifications. notify-new-message sends data-only payloads
+  -- exclusively to such tokens and falls back to a legacy OS-rendered
+  -- notification payload for every other token, so older installed binaries
+  -- keep receiving notifications they can display during the rollout.
+  supports_data_only boolean not null default false,
   updated_at  timestamptz not null default now(),
   constraint device_tokens_user_token_unique unique (user_id, token)
 );
@@ -423,6 +443,52 @@ $$;
 drop trigger if exists sharing_revocation_clears_location on public.location_sharing;
 create trigger sharing_revocation_clears_location after update of is_enabled or delete on public.location_sharing
 for each row execute function public.remove_unshared_latest_location();
+commit;
+
+-- Server-side retention: expiry is always stamped from the server clock, a
+-- client timestamp can never be in the future, and a fix older than the
+-- retention window is refused instead of being shown as current. Existing
+-- installs get the columns and the backfill from
+-- supabase/migrations/20261023_location_retention_expiration.sql.
+begin;
+create or replace function public.enforce_location_retention()
+returns trigger language plpgsql security invoker set search_path = '' as $$
+declare
+  retention interval := public.location_retention_interval();
+begin
+  new.received_at := now();
+  if new.recorded_at is null or new.recorded_at > now() then
+    new.recorded_at := now();
+  end if;
+  if now() - new.recorded_at > retention then
+    raise exception 'KaSpot refused a location fix older than the % retention window', retention
+      using errcode = '22000';
+  end if;
+  new.expires_at := now() + retention;
+  return new;
+end;
+$$;
+
+drop trigger if exists location_retention_enforcement on public.locations;
+create trigger location_retention_enforcement before insert or update on public.locations
+for each row execute function public.enforce_location_retention();
+
+-- Physical purge of expired rows. Read invisibility is enforced by the SELECT
+-- policy above, so this only reclaims storage and is meant for a scheduler.
+-- pg_cron is available on the project but not installed, and scheduling it is a
+-- separate approved deployment step (see the migration file).
+create or replace function public.delete_expired_locations()
+returns integer language plpgsql security definer set search_path = '' as $$
+declare
+  removed integer;
+begin
+  delete from public.locations where expires_at <= now();
+  get diagnostics removed = row_count;
+  return removed;
+end;
+$$;
+revoke all on function public.delete_expired_locations() from public, anon, authenticated;
+grant execute on function public.delete_expired_locations() to postgres, service_role;
 commit;
 
 -- Automatically provision profile and default notification preferences on signup

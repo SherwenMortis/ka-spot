@@ -3,9 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../services/in_app_notification_service.dart';
 import '../services/kaspot_service.dart';
+import '../services/notification_navigation.dart';
+import '../services/push_notification_service.dart';
 import '../widgets/in_app_notification_banner.dart';
 import '../widgets/interactive_nav_bar.dart';
-import 'circle_chat_screen.dart';
 import 'connections_screen.dart';
 import 'map_screen.dart';
 import 'places_screen.dart';
@@ -69,27 +70,47 @@ class _HomeShellState extends State<HomeShell> {
           final rel = sender['relationship'] as String? ?? 'Friend';
           final avatar = sender['avatar_url'] as String?;
 
+          final messageId = newRecord['id'] as String?;
+
           InAppNotificationService.show(InAppNotificationPayload(
-            id: 'msg-${newRecord['id'] ?? DateTime.now().millisecondsSinceEpoch}',
+            id: 'msg-${messageId ?? DateTime.now().millisecondsSinceEpoch}',
             type: InAppNotificationType.chat,
             title: '$rel · $senderName',
             body: content,
             avatarUrl: avatar,
             relationship: rel,
             senderId: senderId,
-            onTap: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => CircleChatScreen(
-                    otherId: senderId,
-                    displayName: senderName,
-                    avatarUrl: avatar,
-                  ),
-                ),
-              );
-            },
+            // Route through the shared coordinator so banner taps and system
+            // notification taps behave identically and never stack duplicates.
+            onTap: () =>
+                NotificationNavigation.route(senderId, messageId: messageId),
           ));
+        },
+      )
+      ..onPostgresChanges(
+        event: PostgresChangeEvent.update,
+        schema: 'public',
+        table: 'circle_messages',
+        filter: PostgresChangeFilter(
+          type: PostgresChangeFilterType.eq,
+          column: 'recipient_id',
+          value: myId,
+        ),
+        callback: (payload) async {
+          // A message we received was marked read (possibly on another device).
+          // Reconcile the authoritative unread count and, once the sender has
+          // no remaining unread messages, dismiss their grouped notification.
+          final updated = payload.newRecord;
+          final senderId = updated['sender_id'] as String?;
+          final readAt = updated['read_at'];
+          if (senderId == null || senderId == myId || readAt == null) return;
+
+          await KaSpotService.loadUnreadCounts();
+          final remaining = KaSpotService.unreadCounts.value[senderId] ?? 0;
+          if (remaining == 0) {
+            await PushNotificationService.clearNotificationsForSender(senderId);
+            InAppNotificationService.dismissForSender(senderId);
+          }
         },
       )
       ..onPostgresChanges(

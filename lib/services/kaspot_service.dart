@@ -7,6 +7,7 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../utils/email_validator.dart';
+import '../utils/location_tracking_config.dart';
 
 class AuthResult {
   final bool isSessionActive;
@@ -532,15 +533,30 @@ class KaSpotService {
   /// Supabase Edge Function can look it up when delivering push notifications.
   static Future<void> registerFcmToken(String token) async {
     if (_client == null || userId.isEmpty) return;
+    final row = <String, dynamic>{
+      'user_id': userId,
+      'token': token,
+      'platform': 'android',
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
+      // Advertises that this build renders data-only FCM messages itself, so
+      // notify-new-message may deliver the reliable data-only payload here.
+      'supports_data_only': true,
+    };
     try {
-      await _client!.from('device_tokens').upsert({
-        'user_id': userId,
-        'token': token,
-        'platform': 'android',
-        'updated_at': DateTime.now().toUtc().toIso8601String(),
-      }, onConflict: 'user_id,token');
+      await _client!.from('device_tokens').upsert(row, onConflict: 'user_id,token');
     } catch (e) {
       debugPrint('[KaSpot] registerFcmToken failed: $e');
+      // The capability column is added by a migration. If it has not been
+      // applied yet, registering the token without it is strictly better than
+      // losing the token (the device would get no notifications at all).
+      // The device then keeps receiving the legacy payload it can display.
+      try {
+        await _client!.from('device_tokens').upsert(
+            Map<String, dynamic>.from(row)..remove('supports_data_only'),
+            onConflict: 'user_id,token');
+      } catch (fallbackError) {
+        debugPrint('[KaSpot] registerFcmToken fallback failed: $fallbackError');
+      }
     }
   }
 
@@ -554,6 +570,10 @@ class KaSpotService {
     _localUser = null;
     lastUserLatitude = null;
     lastUserLongitude = null;
+    sharingActive.value = false;
+    // A signed-out device keeps no coordinates of its own: the single queued fix
+    // is removed instead of lingering for the next account on this phone.
+    await clearPendingLocation();
     passwordRecoveryActive.value = false;
     authStateNotifier.value = false;
     profileNotifier.value = null;
@@ -879,9 +899,16 @@ class KaSpotService {
         'is_enabled': enabled,
         'updated_at': DateTime.now().toUtc().toIso8601String(),
       }, onConflict: 'owner_id,recipient_id');
-      if (!enabled) await _removeLocationIfNoActiveGrants();
+      if (enabled) {
+        sharingActive.value = true;
+      } else {
+        // Publishes whether any enabled grant is left, which is what lets the
+        // tracking service stop acquiring GPS it has nowhere to send.
+        await _removeLocationIfNoActiveGrants();
+      }
     } else {
       _localSharingGrants[recipientId] = enabled;
+      sharingActive.value = _localSharingGrants.values.any((on) => on);
     }
   }
 
@@ -897,7 +924,11 @@ class KaSpotService {
           'updated_at': DateTime.now().toUtc().toIso8601String(),
         }, onConflict: 'owner_id,recipient_id');
       }
-      if (!enabled) await _removeLocationIfNoActiveGrants();
+      if (enabled) {
+        sharingActive.value = true;
+      } else {
+        await _removeLocationIfNoActiveGrants();
+      }
     } else {
       if (_localSharingGrants.isEmpty && _localConnections.isNotEmpty) {
         for (final c in _localConnections) {
@@ -910,15 +941,26 @@ class KaSpotService {
           _localSharingGrants[key] = enabled;
         }
       }
+      sharingActive.value = enabled;
     }
   }
 
+  /// Whether at least one enabled sharing grant exists for this account.
+  /// Reactive on purpose: the tracking service watches it so GPS acquisition —
+  /// and the foreground-service notification that goes with it — does not outlive
+  /// the authorization it exists to serve.
+  static final ValueNotifier<bool> sharingActive = ValueNotifier<bool>(false);
+
   static Future<bool> anySharingEnabled() async {
+    final bool enabled;
     if (_client != null) {
       final rows = await _client!.from('location_sharing').select('id').eq('owner_id', userId).eq('is_enabled', true).limit(1);
-      return rows.isNotEmpty;
+      enabled = rows.isNotEmpty;
+    } else {
+      enabled = _localSharingGrants.values.any((on) => on);
     }
-    return _localSharingGrants.values.any((enabled) => enabled);
+    sharingActive.value = enabled;
+    return enabled;
   }
 
   /// Key under which the single latest un-uploaded location fix is stored when
@@ -928,32 +970,58 @@ class KaSpotService {
   /// Test-only upload hook: when set, the real network upload is replaced by
   /// this function so offline behavior can be unit-tested deterministically.
   @visibleForTesting
-  static Future<void> Function(double latitude, double longitude)? debugUploadOverride;
+  static Future<void> Function(double latitude, double longitude, DateTime recordedAt)?
+      debugUploadOverride;
 
-  static Future<void> upsertOwnLocation(Position position) {
-    return upsertOwnLocationAt(position.latitude, position.longitude);
+  /// Returns true when the fix was accepted for upload, false when the
+  /// authorization gate refused it because no enabled sharing grant is left.
+  static Future<bool> upsertOwnLocation(Position position) {
+    // Carry the fix's own timestamp: a location captured while offline keeps the
+    // time it was measured, so reconnecting can never dress an old fix up as a
+    // current one.
+    return upsertOwnLocationAt(
+      position.latitude,
+      position.longitude,
+      recordedAt: position.timestamp,
+    );
   }
 
   /// Uploads the user's latest coordinate. When the phone is offline the fix
   /// is queued (overwriting any older pending point) and re-sent automatically
   /// by [flushPendingLocation] as soon as connectivity returns.
-  static Future<void> upsertOwnLocationAt(double latitude, double longitude) async {
+  static Future<bool> upsertOwnLocationAt(
+    double latitude,
+    double longitude, {
+    DateTime? recordedAt,
+  }) async {
     lastUserLatitude = latitude;
     lastUserLongitude = longitude;
+    final fixTime = _sanitizeFixTime(recordedAt ?? DateTime.now().toUtc());
     try {
       if (!await anySharingEnabled()) {
         // Sharing is off: zero-trail means nothing may remain queued either.
         await clearPendingLocation();
-        return;
+        return false;
       }
-      await _uploadLocation(latitude, longitude, DateTime.now().toUtc());
+      await _uploadLocation(latitude, longitude, fixTime);
       await clearPendingLocation();
+      return true;
     } catch (_) {
       // No usable connection (or backend unreachable): keep the latest fix so
       // it can be sent the moment connectivity returns.
-      await _savePendingLocation(latitude, longitude);
+      await _savePendingLocation(latitude, longitude, fixTime);
       rethrow;
     }
+  }
+
+  /// A device clock running ahead would otherwise stamp a coordinate that keeps
+  /// looking fresh past its retention window, so a future fix time is pulled
+  /// back to the present. The database clamps this again server-side.
+  static DateTime _sanitizeFixTime(DateTime recordedAt) {
+    final utc = recordedAt.toUtc();
+    final now = DateTime.now().toUtc();
+    if (utc.isAfter(now.add(const Duration(minutes: 5)))) return now;
+    return utc;
   }
 
   /// Sends a queued fix (if any) left over from an offline period. Safe to
@@ -988,6 +1056,22 @@ class KaSpotService {
       return;
     }
 
+    final recordedAt = DateTime.tryParse(data['at'] as String? ?? '')?.toUtc();
+    if (recordedAt == null) {
+      // Without a trustworthy capture time the point cannot be labelled fresh,
+      // so it is dropped rather than uploaded as if it had just been measured.
+      await prefs.remove(_pendingFixKey);
+      return;
+    }
+    if (DateTime.now().toUtc().difference(recordedAt) >
+        LocationTrackingConfig.maxQueuedFixAge) {
+      // Older than the retention window: uploading it would show a position the
+      // backend would immediately refuse to serve anyway. Zero-trail: drop it.
+      await prefs.remove(_pendingFixKey);
+      debugPrint('KaSpot dropped a queued fix older than the retention window.');
+      return;
+    }
+
     try {
       if (!await anySharingEnabled()) {
         // Now that we are back online we can see sharing was revoked while
@@ -995,7 +1079,6 @@ class KaSpotService {
         await clearPendingLocation();
         return;
       }
-      final recordedAt = DateTime.tryParse(data['at'] as String? ?? '')?.toUtc() ?? DateTime.now().toUtc();
       await _uploadLocation(latitude, longitude, recordedAt);
       await clearPendingLocation();
       debugPrint('KaSpot pending location synced after reconnect.');
@@ -1007,7 +1090,7 @@ class KaSpotService {
   static Future<void> _uploadLocation(double latitude, double longitude, DateTime recordedAt) async {
     final override = debugUploadOverride;
     if (override != null) {
-      await override(latitude, longitude);
+      await override(latitude, longitude, recordedAt);
       return;
     }
     if (_client != null) {
@@ -1020,7 +1103,8 @@ class KaSpotService {
     }
   }
 
-  static Future<void> _savePendingLocation(double latitude, double longitude) async {
+  static Future<void> _savePendingLocation(
+      double latitude, double longitude, DateTime recordedAt) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(
@@ -1028,7 +1112,8 @@ class KaSpotService {
         jsonEncode({
           'lat': latitude,
           'lon': longitude,
-          'at': DateTime.now().toUtc().toIso8601String(),
+          // The time the fix was *measured*, not the time it is retried.
+          'at': recordedAt.toUtc().toIso8601String(),
           'uid': userId,
         }),
       );
@@ -1048,6 +1133,17 @@ class KaSpotService {
     }
   }
 
+  /// True when the server-stamped retention deadline has passed. Rows written
+  /// before the retention migration ships carry no `expires_at`, so they are
+  /// left alone rather than being silently dropped.
+  static bool _locationExpired(Map<String, dynamic> row) {
+    final raw = row['expires_at'] as String?;
+    if (raw == null) return false;
+    final expiresAt = DateTime.tryParse(raw)?.toUtc();
+    if (expiresAt == null) return false;
+    return !expiresAt.isAfter(DateTime.now().toUtc());
+  }
+
   static Future<List<Map<String, dynamic>>> sharedLocations() async {
     final rels = await circleRelationships();
     if (_client != null) {
@@ -1056,9 +1152,13 @@ class KaSpotService {
       if (grants.isEmpty) return [];
       final ids = grants.map((row) => row['owner_id'] as String).toSet().toList();
       final locations = await _client!.from('locations').select().inFilter('user_id', ids);
+      // Defense in depth: the authorized-read policy already drops expired rows,
+      // but a cached response must never put a past-retention coordinate on the
+      // map either.
+      final live = locations.where((row) => !_locationExpired(row)).toList();
       final profiles = await _client!.from('profiles').select('id,display_name,avatar_url').inFilter('id', ids);
       final profileMap = {for (final profile in profiles) profile['id'] as String: profile};
-      return locations.map((row) {
+      return live.map((row) {
         final otherId = row['user_id'] as String;
         final profile = profileMap[otherId];
         return {
@@ -1108,7 +1208,15 @@ class KaSpotService {
     }
   }
 
+  /// Test-only: makes preference reads and writes fail the way an unreachable
+  /// backend does, so offline start-up and offline sign-out can be exercised
+  /// deterministically (same role as [debugUploadOverride] plays for uploads).
+  @visibleForTesting
+  static Object? debugPreferenceFailure;
+
   static Future<Map<String, dynamic>> notificationPreferences() async {
+    final failure = debugPreferenceFailure;
+    if (failure != null) throw failure;
     if (_client != null) {
       final rows = await _client!.from('notification_preferences').select().eq('user_id', userId).limit(1);
       if (rows.isEmpty) {
@@ -1124,6 +1232,8 @@ class KaSpotService {
   }
 
   static Future<void> setNotificationPreference(String field, bool value) async {
+    final failure = debugPreferenceFailure;
+    if (failure != null) throw failure;
     if (!{'connection_notifications_enabled', 'arrival_alerts_enabled', 'background_sharing_enabled'}.contains(field)) return;
     if (_client != null) {
       await _client!.from('notification_preferences').upsert({

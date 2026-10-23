@@ -9,6 +9,7 @@ import '../services/background_location_service.dart';
 import '../services/connectivity_service.dart';
 import '../services/in_app_notification_service.dart';
 import '../services/kaspot_service.dart';
+import '../utils/location_tracking_config.dart';
 import '../widgets/kaspot_avatar.dart';
 import '../widgets/kaspot_logo.dart';
 import 'profile_screen.dart';
@@ -109,7 +110,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
       final position = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.high,
-          timeLimit: Duration(seconds: 8),
+          timeLimit: LocationTrackingConfig.autoFixTimeLimit,
         ),
       );
 
@@ -313,7 +314,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
     return Geolocator.getCurrentPosition(
       locationSettings: const LocationSettings(
         accuracy: LocationAccuracy.high,
-        timeLimit: Duration(seconds: 15),
+        timeLimit: LocationTrackingConfig.singleFixTimeLimit,
       ),
     );
   }
@@ -613,14 +614,25 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
                             },
                           ),
                           const Divider(height: 1, indent: 16, endIndent: 16),
-                          ValueListenableBuilder<bool>(
-                            valueListenable: BackgroundLocationService.isBackgroundSharingEnabled,
-                            builder: (context, bgEnabled, _) {
+                          ListenableBuilder(
+                            listenable: Listenable.merge([
+                              BackgroundLocationService.isBackgroundSharingEnabled,
+                              BackgroundLocationService.state,
+                            ]),
+                            builder: (context, _) {
+                              final bgEnabled =
+                                  BackgroundLocationService.isBackgroundSharingEnabled.value;
                               return SwitchListTile.adaptive(
                                 title: const Text('Background Sharing', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14.5)),
-                                subtitle: const Text(
-                                  'Continue updating when KaSpot is closed or phone is locked (50m smart filter)',
-                                  style: TextStyle(fontSize: 12),
+                                // Spelled out from the values the service really
+                                // applies, and never claimed as a guarantee.
+                                subtitle: Text(
+                                  bgEnabled
+                                      ? BackgroundLocationService.describeState()
+                                      : 'Keep updating after you leave KaSpot: asks for a fix '
+                                          'about every ${LocationTrackingConfig.streamInterval.inSeconds} s '
+                                          'once you have moved ${LocationTrackingConfig.distanceFilterMeters} m',
+                                  style: const TextStyle(fontSize: 12),
                                 ),
                                 value: bgEnabled,
                                 activeThumbColor: const Color(0xFF10B981),
@@ -692,9 +704,10 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
     final markers = <Marker>[
       ..._shared.map((item) {
         final recorded = DateTime.tryParse(item['recorded_at'] as String? ?? '')?.toLocal();
-        // 20 minutes gives the ~30-second stationary heartbeat safe margin
-        // before a member is flagged as inactive.
-        final stale = recorded == null || DateTime.now().difference(recorded) > const Duration(minutes: 20);
+        // A member is only flagged inactive once they are well past the
+        // stationary heartbeat window — see LocationTrackingConfig.
+        final stale = recorded == null ||
+            DateTime.now().difference(recorded) > LocationTrackingConfig.markerStaleAfter;
         final name = (item['display_name'] as String? ?? 'Friend').split(' ').first;
         final point = LatLng(
           (item['latitude'] as num).toDouble(),
@@ -804,35 +817,62 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
                           const Spacer(),
 
                           // Option A: Unified Modern Control Capsule
-                          ValueListenableBuilder<bool>(
-                            valueListenable: BackgroundLocationService.isBackgroundSharingEnabled,
-                            builder: (context, bgActive, _) {
-                              final isLive = _sharing;
+                          ListenableBuilder(
+                            listenable: Listenable.merge([
+                              BackgroundLocationService.isBackgroundSharingEnabled,
+                              BackgroundLocationService.state,
+                            ]),
+                            builder: (context, _) {
+                              final bgActive =
+                                  BackgroundLocationService.isBackgroundSharingEnabled.value;
+                              final tracking = BackgroundLocationService.state.value;
                               final isOnline = _online;
-                              final dotColor = !isOnline
-                                  ? const Color(0xFFD97706)
-                                  : isLive
-                                      ? const Color(0xFF10B981)
-                                      : const Color(0xFF94A3B8);
+                              // Honest label: nothing may read as "live" unless a
+                              // position is actually being reported right now —
+                              // a stored preference is not evidence of tracking.
                               final statusText = !isOnline
                                   ? 'Offline'
-                                  : isLive
-                                      ? (bgActive ? 'Live · Bg' : 'Live')
-                                      : 'Paused';
-                              final textColor = !isOnline
-                                  ? const Color(0xFF92400E)
-                                  : isLive
-                                      ? const Color(0xFF065F46)
+                                  : !_sharing
+                                      ? 'Paused'
+                                      : switch (tracking) {
+                                          TrackingState.streaming =>
+                                            bgActive ? 'Live · Bg' : 'Live',
+                                          TrackingState.starting => 'Starting…',
+                                          TrackingState.waitingForFix => 'Finding GPS',
+                                          TrackingState.degraded => 'Not syncing',
+                                          TrackingState.blockedLocationServices =>
+                                            'Location off',
+                                          TrackingState.blockedPermission =>
+                                            'Needs permission',
+                                          TrackingState.failed => 'Not reporting',
+                                          TrackingState.suspendedNoSharing => 'Paused',
+                                          TrackingState.off =>
+                                            _myPoint != null ? 'Live' : 'Not reporting',
+                                        };
+                              final isLive = statusText == 'Live' || statusText == 'Live · Bg';
+                              final isProblem = !isOnline ||
+                                  (!isLive &&
+                                      statusText != 'Paused' &&
+                                      statusText != 'Starting…');
+                              final dotColor = isLive
+                                  ? const Color(0xFF10B981)
+                                  : isProblem
+                                      ? const Color(0xFFD97706)
+                                      : const Color(0xFF94A3B8);
+                              final textColor = isLive
+                                  ? const Color(0xFF065F46)
+                                  : isProblem
+                                      ? const Color(0xFF92400E)
                                       : const Color(0xFF475569);
-                              final capsuleBg = !isOnline
-                                  ? const Color(0xFFFFFBEB)
-                                  : isLive
-                                      ? const Color(0xFFECFDF5)
+                              final capsuleBg = isLive
+                                  ? const Color(0xFFECFDF5)
+                                  : isProblem
+                                      ? const Color(0xFFFFFBEB)
                                       : const Color(0xFFF8FAFC);
-                              final capsuleBorder = !isOnline
-                                  ? const Color(0xFFFDE68A)
-                                  : isLive
-                                      ? const Color(0xFFA7F3D0)
+                              final capsuleBorder = isLive
+                                  ? const Color(0xFFA7F3D0)
+                                  : isProblem
+                                      ? const Color(0xFFFDE68A)
                                       : const Color(0xFFCBD5E1);
 
                               return Container(

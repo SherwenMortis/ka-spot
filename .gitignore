@@ -82,3 +82,8 @@ supabase/.temp/
 *google-services*.json
 android/app/google-services.json
 ios/Runner/GoogleService-Info.plist
+
+# Live Realtime check artifacts: throwaway sign-in credentials and the SQL the
+# account script generates for them. Never commit these.
+tool/*.accounts
+supabase/tmp_*.sql

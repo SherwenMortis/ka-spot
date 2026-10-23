@@ -11,6 +11,7 @@ import 'screens/welcome_screen.dart';
 import 'services/background_location_service.dart';
 import 'services/connectivity_service.dart';
 import 'services/kaspot_service.dart';
+import 'services/notification_navigation.dart';
 import 'services/push_notification_service.dart';
 
 Future<void> main() async {
@@ -83,6 +84,9 @@ class _KaSpotAppState extends State<KaSpotApp> {
   @override
   void initState() {
     super.initState();
+    // Allow notification taps to resolve into navigation once the root
+    // navigator and authenticated session are ready.
+    NotificationNavigation.navigatorKey = _navigatorKey;
     KaSpotService.authStateNotifier.addListener(_onAuthChanged);
     KaSpotService.passwordRecoveryActive.addListener(_onRecoveryStateChanged);
   }
@@ -97,7 +101,10 @@ class _KaSpotAppState extends State<KaSpotApp> {
   void _onAuthChanged() {
     if (!KaSpotService.authStateNotifier.value) {
       // A signed-out or unverified state must never keep streaming location.
-      unawaited(BackgroundLocationService.stopBackgroundTracking(persist: false));
+      // BackgroundLocationService listens to the same signal and performs the
+      // network-independent local stop, notification teardown and consent
+      // withdrawal — see BackgroundLocationService.onSignedOut().
+      unawaited(BackgroundLocationService.onSignedOut());
     } else {
       // A fix queued while signed out (or offline) can now be safely
       // attributed to the signed-in account and sent.

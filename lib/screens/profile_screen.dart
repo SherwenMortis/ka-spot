@@ -6,12 +6,19 @@ import 'package:image_picker/image_picker.dart';
 import '../services/background_location_service.dart';
 import '../services/kaspot_service.dart';
 import '../utils/image_optimizer.dart';
+import '../utils/location_tracking_config.dart';
 import '../widgets/kaspot_avatar.dart';
 import 'privacy_policy_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
 
+  /// The consent disclosure for background location sharing.
+  ///
+  /// Every number and every limitation shown here comes from
+  /// [LocationTrackingConfig] — the same values the tracking service applies —
+  /// so the dialog cannot drift away from what the code really does. Nothing in
+  /// it promises continuous tracking, exact cadence or GPS accuracy.
   static Future<bool?> showBackgroundConsentDialog(BuildContext context) {
     return showDialog<bool>(
       context: context,
@@ -29,43 +36,49 @@ class ProfileScreen extends StatefulWidget {
             ),
           ],
         ),
-        content: const Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Keep sharing your latest position with your authorized circle even when KaSpot is closed or minimized.',
-              style: TextStyle(height: 1.45, fontSize: 13.5),
-            ),
-            SizedBox(height: 14),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(Icons.battery_charging_full_rounded, size: 18, color: Color(0xFF10B981)),
-                SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Battery-Smart: transmits when you move (50m filter), plus a brief safety heartbeat about every 10 minutes so your circle knows you\'re connected.',
-                    style: TextStyle(fontSize: 12.5, color: Color(0xFF475569)),
-                  ),
-                ),
-              ],
-            ),
-            SizedBox(height: 10),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(Icons.notifications_active_outlined, size: 18, color: Color(0xFF2563EB)),
-                SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Transparency: A status notification remains active on mobile while sharing.',
-                    style: TextStyle(fontSize: 12.5, color: Color(0xFF475569)),
-                  ),
-                ),
-              ],
-            ),
-          ],
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Keep sharing your latest position with your authorized circle '
+                'after you leave KaSpot or lock your phone.',
+                style: TextStyle(height: 1.45, fontSize: 13.5),
+              ),
+              const SizedBox(height: 14),
+              _ConsentBullet(
+                icon: Icons.battery_charging_full_rounded,
+                color: Color(0xFF10B981),
+                text: LocationTrackingConfig.cadenceSummary,
+              ),
+              _ConsentBullet(
+                icon: Icons.speed_rounded,
+                color: Color(0xFF64748B),
+                text: LocationTrackingConfig.cadenceDisclaimer,
+              ),
+              _ConsentBullet(
+                icon: Icons.close_rounded,
+                color: Color(0xFFD97706),
+                text: LocationTrackingConfig.lifecycleDisclosure,
+              ),
+              _ConsentBullet(
+                icon: Icons.lock_outline_rounded,
+                color: Color(0xFF1E60AA),
+                text: LocationTrackingConfig.permissionDisclosure,
+              ),
+              _ConsentBullet(
+                icon: Icons.gps_fixed_rounded,
+                color: Color(0xFF64748B),
+                text: LocationTrackingConfig.accuracyDisclaimer,
+              ),
+              _ConsentBullet(
+                icon: Icons.notifications_active_outlined,
+                color: Color(0xFF2563EB),
+                text: LocationTrackingConfig.notificationDisclosure,
+              ),
+            ],
+          ),
         ),
         actions: [
           TextButton(
@@ -83,6 +96,40 @@ class ProfileScreen extends StatefulWidget {
 
   @override
   State<ProfileScreen> createState() => _ProfileScreenState();
+}
+
+/// One honest line of background-sharing disclosure, rendered in the existing
+/// KaSpot bullet style. The text always comes from [LocationTrackingConfig].
+class _ConsentBullet extends StatelessWidget {
+  const _ConsentBullet({
+    required this.icon,
+    required this.color,
+    required this.text,
+  });
+
+  final IconData icon;
+  final Color color;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 18, color: color),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: const TextStyle(fontSize: 12.5, color: Color(0xFF475569), height: 1.4),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
@@ -1005,9 +1052,19 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
           ),
           const SizedBox(height: 16),
           _SettingsGroup(children: [
-            ValueListenableBuilder<bool>(
-              valueListenable: BackgroundLocationService.isBackgroundSharingEnabled,
-              builder: (context, bgEnabled, _) {
+            ListenableBuilder(
+              listenable: Listenable.merge([
+                BackgroundLocationService.isBackgroundSharingEnabled,
+                BackgroundLocationService.state,
+              ]),
+              builder: (context, _) {
+                final bgEnabled = BackgroundLocationService.isBackgroundSharingEnabled.value;
+                // The switch shows the user's choice; the line under it shows
+                // what the service is really doing, so a failed start can never
+                // read as "Active".
+                final statusLine = bgEnabled
+                    ? BackgroundLocationService.describeState()
+                    : 'Off · Only updates while the app is on screen';
                 return SwitchListTile.adaptive(
                   value: bgEnabled,
                   onChanged: (val) async {
@@ -1055,10 +1112,19 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
                     style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: Color(0xFF0F172A)),
                   ),
                   subtitle: Text(
-                    bgEnabled
-                        ? 'Active · Transmits when closed & moving'
-                        : 'Off · Only updates while app is on screen',
-                    style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                    statusLine,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: bgEnabled &&
+                              (BackgroundLocationService.state.value ==
+                                  TrackingState.failed ||
+                                  BackgroundLocationService.state.value ==
+                                      TrackingState.blockedPermission ||
+                                  BackgroundLocationService.state.value ==
+                                      TrackingState.blockedLocationServices)
+                          ? const Color(0xFFD97706)
+                          : const Color(0xFF64748B),
+                    ),
                   ),
                   contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                 );
@@ -1123,9 +1189,9 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: const Color(0xFFE2E8F0)),
             ),
-            child: const Text(
-              'Consent-First Tracking: When Background Location is OFF, KaSpot never polls or transmits your GPS when the app is closed. When turned ON, KaSpot continues updating your circle using battery-smart 50m movement filtering, plus a brief safety heartbeat about every 10 minutes so your circle knows you\'re connected — and any update that cannot be sent while offline is synced automatically once internet returns.',
-              style: TextStyle(color: Color(0xFF64748B), height: 1.45, fontSize: 13),
+            child: Text(
+              LocationTrackingConfig.privacyCardSummary,
+              style: const TextStyle(color: Color(0xFF64748B), height: 1.45, fontSize: 13),
             ),
           ),
         ],
