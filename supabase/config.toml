@@ -1,0 +1,26 @@
+# KaSpot — Supabase project configuration.
+#
+# Only the settings this repository depends on are pinned here; the CLI supplies
+# defaults for everything else. Secrets are never stored in this file: they live
+# in Edge Function secrets (dashboard: Project Settings → Edge Functions →
+# Secrets) and, for the database side, in the Database Webhook definition.
+
+project_id = "kaspot"
+
+[functions.notify-new-message]
+# Invoked by the Database Webhook through pg_net, which is not a user and cannot
+# present a session JWT. The platform check is off ON PURPOSE and is replaced by
+# a mandatory in-handler check against KASPOT_WEBHOOK_SECRET (webhook_secret.ts):
+# every request without it is rejected before the body is read.
+#
+# NEVER deploy this function with verify_jwt = false unless that secret is set
+# and the webhook sends it — the function refuses every request until both are
+# true, which is the intended failure mode (no pushes) rather than an open
+# endpoint.
+verify_jwt = false
+
+[functions.delete-account]
+# Called by the Flutter app with the user's access token. The platform check
+# stays on, and the function additionally re-verifies the token with the auth
+# server before deleting anything.
+verify_jwt = true

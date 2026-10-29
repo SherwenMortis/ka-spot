@@ -3,11 +3,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
+
 import '../services/background_location_service.dart';
 import '../services/kaspot_service.dart';
 import '../utils/image_optimizer.dart';
 import '../utils/location_tracking_config.dart';
+import '../utils/release_flags.dart';
 import '../widgets/kaspot_avatar.dart';
+import 'delete_account_screen.dart';
 import 'privacy_policy_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -123,7 +126,11 @@ class _ConsentBullet extends StatelessWidget {
           Expanded(
             child: Text(
               text,
-              style: const TextStyle(fontSize: 12.5, color: Color(0xFF475569), height: 1.4),
+              style: const TextStyle(
+                fontSize: 12.5,
+                color: Color(0xFF475569),
+                height: 1.4,
+              ),
             ),
           ),
         ],
@@ -158,9 +165,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _pickAvatar() async {
     final picker = ImagePicker();
 
-    final isMobile = !kIsWeb &&
+    final isMobile =
+        !kIsWeb &&
         (defaultTargetPlatform == TargetPlatform.android ||
-         defaultTargetPlatform == TargetPlatform.iOS);
+            defaultTargetPlatform == TargetPlatform.iOS);
 
     final source = await showModalBottomSheet<String>(
       context: context,
@@ -194,7 +202,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Icon(
-                    isMobile ? Icons.photo_library_rounded : Icons.computer_rounded,
+                    isMobile
+                        ? Icons.photo_library_rounded
+                        : Icons.computer_rounded,
                     color: const Color(0xFF1E60AA),
                   ),
                 ),
@@ -218,9 +228,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       color: const Color(0xFFEBF5FF),
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: const Icon(Icons.camera_alt_rounded, color: Color(0xFF1E60AA)),
+                    child: const Icon(
+                      Icons.camera_alt_rounded,
+                      color: Color(0xFF1E60AA),
+                    ),
                   ),
-                  title: const Text('Take a Photo', style: TextStyle(fontWeight: FontWeight.w700)),
+                  title: const Text(
+                    'Take a Photo',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
                   subtitle: const Text('Use camera to take a new picture'),
                   onTap: () => Navigator.pop(context, 'camera'),
                 ),
@@ -232,9 +248,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     color: const Color(0xFFECFDF5),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: const Icon(Icons.face_rounded, color: Color(0xFF059669)),
+                  child: const Icon(
+                    Icons.face_rounded,
+                    color: Color(0xFF059669),
+                  ),
                 ),
-                title: const Text('Choose from Presets', style: TextStyle(fontWeight: FontWeight.w700)),
+                title: const Text(
+                  'Choose from Presets',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
                 subtitle: const Text('Select a curated portrait avatar'),
                 onTap: () => Navigator.pop(context, 'presets'),
               ),
@@ -248,9 +270,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       color: const Color(0xFFFEF2F2),
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: const Icon(Icons.delete_outline_rounded, color: Color(0xFFEF4444)),
+                    child: const Icon(
+                      Icons.delete_outline_rounded,
+                      color: Color(0xFFEF4444),
+                    ),
                   ),
-                  title: const Text('Remove Photo', style: TextStyle(fontWeight: FontWeight.w700, color: Color(0xFFEF4444))),
+                  title: const Text(
+                    'Remove Photo',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFFEF4444),
+                    ),
+                  ),
                   subtitle: const Text('Revert to initial gradient avatar'),
                   onTap: () => Navigator.pop(context, 'remove'),
                 ),
@@ -297,19 +328,27 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
       if (mounted) {
         setState(() => _avatarUrl = optimized.base64DataUri);
-        _notify('Profile photo updated! (Optimized to ${optimized.kilobytes.toStringAsFixed(1)} KB)');
+        _notify(
+          'Profile photo updated! (Optimized to ${optimized.kilobytes.toStringAsFixed(1)} KB)',
+        );
       }
     } catch (e) {
-      if (e.toString().contains('cameraDelegate') || e.toString().contains('ImageSource.camera')) {
+      if (e.toString().contains('cameraDelegate') ||
+          e.toString().contains('ImageSource.camera')) {
         if (mounted) {
-          _notify('Live camera capture is for mobile devices (Android/iOS). Please choose a photo from your computer.');
+          _notify(
+            'Live camera capture is for mobile devices (Android/iOS). Please choose a photo from your computer.',
+          );
         }
-      } else if (e is MissingPluginException || e.toString().contains('MissingPluginException')) {
+      } else if (e is MissingPluginException ||
+          e.toString().contains('MissingPluginException')) {
         if (mounted) {
           showDialog<void>(
             context: context,
             builder: (context) => AlertDialog(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+              ),
               title: const Row(
                 children: [
                   Icon(Icons.restart_alt_rounded, color: Color(0xFF1E60AA)),
@@ -317,7 +356,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   Expanded(
                     child: Text(
                       'Restart App to Enable Picker',
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                 ],
@@ -376,9 +418,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 child: Container(
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    border: Border.all(color: const Color(0xFF2563EB), width: 2),
+                    border: Border.all(
+                      color: const Color(0xFF2563EB),
+                      width: 2,
+                    ),
                     boxShadow: const [
-                      BoxShadow(color: Color(0x20000000), blurRadius: 4, offset: Offset(0, 2)),
+                      BoxShadow(
+                        color: Color(0x20000000),
+                        blurRadius: 4,
+                        offset: Offset(0, 2),
+                      ),
                     ],
                   ),
                   child: ClipOval(
@@ -395,7 +444,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
         ],
       ),
     );
@@ -413,7 +465,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-
   Future<void> _rename() async {
     final controller = TextEditingController(text: _name);
     final ok = await showDialog<bool>(
@@ -427,8 +478,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
           decoration: const InputDecoration(labelText: 'Display name'),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Save')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Save'),
+          ),
         ],
       ),
     );
@@ -491,7 +548,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: const Text('Cancel'),
           ),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: const Color(0xFFDC2626)),
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFFDC2626),
+            ),
             onPressed: () => Navigator.pop(dialogContext, true),
             child: const Text('Sign Out'),
           ),
@@ -512,7 +571,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-
+  /// Opens the deletion screen. Nothing is deleted here: the screen explains
+  /// the consequences, requires the typed confirmation and re-authenticates
+  /// before it sends anything.
+  Future<void> _openDeleteAccount() async {
+    if (_busy) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const DeleteAccountScreen()),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -543,7 +611,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
               borderRadius: BorderRadius.circular(24),
               border: Border.all(color: const Color(0xFFE2E8F0)),
               boxShadow: const [
-                BoxShadow(color: Color(0x0A000000), blurRadius: 12, offset: Offset(0, 4)),
+                BoxShadow(
+                  color: Color(0x0A000000),
+                  blurRadius: 12,
+                  offset: Offset(0, 4),
+                ),
               ],
             ),
             child: Row(
@@ -573,7 +645,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             shape: BoxShape.circle,
                             border: Border.all(color: Colors.white, width: 2),
                             boxShadow: const [
-                              BoxShadow(color: Color(0x30000000), blurRadius: 4, offset: Offset(0, 1)),
+                              BoxShadow(
+                                color: Color(0x30000000),
+                                blurRadius: 4,
+                                offset: Offset(0, 1),
+                              ),
                             ],
                           ),
                           child: const Icon(
@@ -596,14 +672,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           Flexible(
                             child: Text(
                               _name,
-                              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: Color(0xFF0F172A)),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                                fontSize: 18,
+                                color: Color(0xFF0F172A),
+                              ),
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
                           const SizedBox(width: 6),
                           GestureDetector(
                             onTap: _rename,
-                            child: const Icon(Icons.edit_outlined, size: 18, color: Color(0xFF1E60AA)),
+                            child: const Icon(
+                              Icons.edit_outlined,
+                              size: 18,
+                              color: Color(0xFF1E60AA),
+                            ),
                           ),
                         ],
                       ),
@@ -627,7 +711,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.badge_outlined, color: Color(0xFF1E60AA), size: 22),
+                  const Icon(
+                    Icons.badge_outlined,
+                    color: Color(0xFF1E60AA),
+                    size: 22,
+                  ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
@@ -635,11 +723,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       children: [
                         const Text(
                           'Your KaSpot Circle Code',
-                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF64748B)),
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF64748B),
+                          ),
                         ),
                         Text(
                           KaSpotService.accountCode,
-                          style: const TextStyle(fontSize: 15, fontFamily: 'monospace', fontWeight: FontWeight.w800, letterSpacing: 0.5, color: Color(0xFF0F172A)),
+                          style: const TextStyle(
+                            fontSize: 15,
+                            fontFamily: 'monospace',
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0.5,
+                            color: Color(0xFF0F172A),
+                          ),
                           overflow: TextOverflow.ellipsis,
                         ),
                       ],
@@ -653,7 +751,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     },
                     icon: const Icon(Icons.copy_rounded, size: 16),
                     label: const Text('Copy'),
-                    style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+                    style: TextButton.styleFrom(
+                      visualDensity: VisualDensity.compact,
+                    ),
                   ),
                 ],
               ),
@@ -663,78 +763,103 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
           // 3. Privacy & Safety Shield Section
           _heading('Privacy & Controls'),
-          _SettingsGroup(children: [
-            _SettingsTile(
-              icon: Icons.shield_outlined,
-              iconColor: const Color(0xFF1E60AA),
-              title: 'Privacy & Sharing Rules',
-              subtitle: 'Control who sees you and pause sharing',
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const PrivacyScreen()),
+          _SettingsGroup(
+            children: [
+              _SettingsTile(
+                icon: Icons.shield_outlined,
+                iconColor: const Color(0xFF1E60AA),
+                title: 'Privacy & Sharing Rules',
+                subtitle: 'Control who sees you and pause sharing',
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const PrivacyScreen()),
+                ),
               ),
-            ),
-            _SettingsTile(
-              icon: Icons.notifications_none_rounded,
-              iconColor: const Color(0xFFF59E0B),
-              title: 'Notifications',
-              subtitle: 'Connection requests and arrival alerts',
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const NotificationsScreen()),
+              _SettingsTile(
+                icon: Icons.notifications_none_rounded,
+                iconColor: const Color(0xFFF59E0B),
+                title: 'Notifications',
+                subtitle: 'Messages, invitations and arrival alerts',
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const NotificationsScreen(),
+                  ),
+                ),
               ),
-            ),
-          ]),
+            ],
+          ),
 
           const SizedBox(height: 16),
 
           // 4. App & Support Section
           _heading('About KaSpot'),
-          _SettingsGroup(children: [
-            _SettingsTile(
-              icon: Icons.privacy_tip_outlined,
-              iconColor: const Color(0xFF10B981),
-              title: 'Privacy Policy',
-              subtitle: 'How KaSpot handles your data',
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const PrivacyPolicyScreen()),
+          _SettingsGroup(
+            children: [
+              _SettingsTile(
+                icon: Icons.privacy_tip_outlined,
+                iconColor: const Color(0xFF10B981),
+                title: 'Privacy Policy',
+                subtitle: 'How KaSpot handles your data',
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const PrivacyPolicyScreen(),
+                  ),
+                ),
               ),
-            ),
-            _SettingsTile(
-              icon: Icons.info_outline_rounded,
-              iconColor: const Color(0xFF64748B),
-              title: 'About KaSpot',
-              subtitle: 'Consent-first location sharing',
-              onTap: () => showAboutDialog(
-                context: context,
-                applicationName: 'KaSpot',
-                applicationVersion: '1.0.0 (Release Candidate)',
-                applicationLegalese: '© 2026 KaSpot. Privacy-first architecture.',
-                children: const [
-                  SizedBox(height: 8),
-                  Text('Your people. Your places. Your peace of mind.'),
-                  SizedBox(height: 8),
-                  Text('Built with Flutter, OpenStreetMap, and Supabase.'),
-                ],
+              _SettingsTile(
+                icon: Icons.info_outline_rounded,
+                iconColor: const Color(0xFF64748B),
+                title: 'About KaSpot',
+                subtitle: 'Consent-first location sharing',
+                onTap: () => showAboutDialog(
+                  context: context,
+                  applicationName: 'KaSpot',
+                  applicationVersion: '1.0.0 (Release Candidate)',
+                  applicationLegalese:
+                      '© 2026 KaSpot. Privacy-first architecture.',
+                  children: const [
+                    SizedBox(height: 8),
+                    Text('Your people. Your places. Your peace of mind.'),
+                    SizedBox(height: 8),
+                    Text('Built with Flutter, OpenStreetMap, and Supabase.'),
+                  ],
+                ),
               ),
-            ),
-          ]),
+            ],
+          ),
 
           const SizedBox(height: 16),
 
-          // 5. Session: Sign Out
+          // 5. Session: Delete Account / Sign Out
           _heading('Session'),
-          _SettingsGroup(children: [
-            _SettingsTile(
-              icon: Icons.logout_rounded,
-              iconColor: const Color(0xFFDC2626),
-              title: 'Sign Out',
-              subtitle: 'Log out of your KaSpot account',
-              titleColor: const Color(0xFFDC2626),
-              onTap: _busy ? null : _confirmSignOut,
-            ),
-          ]),
+          _SettingsGroup(
+            children: [
+              // Hidden unless the build was produced for a project where the
+              // delete-account function is deployed and verified — a deletion
+              // screen that cannot delete is worse than no button.
+              if (ReleaseFlags.accountDeletionEnabled) ...[
+                _SettingsTile(
+                  icon: Icons.delete_forever_rounded,
+                  iconColor: const Color(0xFFDC2626),
+                  title: 'Delete Account',
+                  subtitle: 'Permanently erase your account and its data',
+                  titleColor: const Color(0xFFDC2626),
+                  onTap: _busy ? null : _openDeleteAccount,
+                ),
+                const Divider(height: 1, indent: 16, endIndent: 16),
+              ],
+              _SettingsTile(
+                icon: Icons.logout_rounded,
+                iconColor: const Color(0xFFDC2626),
+                title: 'Sign Out',
+                subtitle: 'Log out of your KaSpot account',
+                titleColor: const Color(0xFFDC2626),
+                onTap: _busy ? null : _confirmSignOut,
+              ),
+            ],
+          ),
         ],
       ),
     );
@@ -832,11 +957,16 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
         if (permission == LocationPermission.denied) {
           permission = await Geolocator.requestPermission();
         }
-        if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
-          throw Exception('Location permission was not granted. Sharing remains off.');
+        if (permission == LocationPermission.denied ||
+            permission == LocationPermission.deniedForever) {
+          throw Exception(
+            'Location permission was not granted. Sharing remains off.',
+          );
         }
         final position = await Geolocator.getCurrentPosition(
-          locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.high,
+          ),
         );
         await KaSpotService.setSharing(otherId, true);
         await KaSpotService.upsertOwnLocation(position);
@@ -852,9 +982,11 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
         // The grant itself was saved; the pause state refreshes on next load.
       }
       if (!mounted) return;
-      _notify(enabled
-          ? 'Location sharing enabled for this person.'
-          : 'Location sharing stopped for this person.');
+      _notify(
+        enabled
+            ? 'Location sharing enabled for this person.'
+            : 'Location sharing stopped for this person.',
+      );
     } catch (e) {
       if (mounted) {
         setState(() => _grants[otherId] = wasEnabled); // rollback on failure
@@ -906,11 +1038,17 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
       ),
       title: Text(
         name,
-        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: Color(0xFF0F172A)),
+        style: const TextStyle(
+          fontWeight: FontWeight.w700,
+          fontSize: 14,
+          color: Color(0xFF0F172A),
+        ),
         overflow: TextOverflow.ellipsis,
       ),
       subtitle: Text(
-        shares ? 'Can see your latest location' : 'Location hidden from this person',
+        shares
+            ? 'Can see your latest location'
+            : 'Location hidden from this person',
         style: TextStyle(
           fontSize: 12,
           color: shares ? const Color(0xFF059669) : const Color(0xFF64748B),
@@ -931,18 +1069,23 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
       ),
       child: Row(
         children: [
-          const Icon(Icons.error_outline_rounded, color: Color(0xFFDC2626), size: 20),
+          const Icon(
+            Icons.error_outline_rounded,
+            color: Color(0xFFDC2626),
+            size: 20,
+          ),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
               _loadError!,
-              style: const TextStyle(color: Color(0xFFB91C1C), fontSize: 13, fontWeight: FontWeight.w600),
+              style: const TextStyle(
+                color: Color(0xFFB91C1C),
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
-          TextButton(
-            onPressed: _retryLoad,
-            child: const Text('Try Again'),
-          ),
+          TextButton(onPressed: _retryLoad, child: const Text('Try Again')),
         ],
       ),
     );
@@ -958,14 +1101,29 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
       ),
       child: Column(
         children: const [
-          Icon(Icons.visibility_off_outlined, size: 32, color: Color(0xFF94A3B8)),
+          Icon(
+            Icons.visibility_off_outlined,
+            size: 32,
+            color: Color(0xFF94A3B8),
+          ),
           SizedBox(height: 10),
-          Text('No circle members yet', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14, color: Color(0xFF0F172A))),
+          Text(
+            'No circle members yet',
+            style: TextStyle(
+              fontWeight: FontWeight.w800,
+              fontSize: 14,
+              color: Color(0xFF0F172A),
+            ),
+          ),
           SizedBox(height: 6),
           Text(
             'Invite trusted people from the Circle tab. Your location stays hidden until you explicitly enable sharing for each person.',
             textAlign: TextAlign.center,
-            style: TextStyle(color: Color(0xFF64748B), height: 1.4, fontSize: 12.5),
+            style: TextStyle(
+              color: Color(0xFF64748B),
+              height: 1.4,
+              fontSize: 12.5,
+            ),
           ),
         ],
       ),
@@ -999,7 +1157,9 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
                   : 'Location sharing resumed for your authorized circle.',
             ),
             behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
+            ),
           ),
         );
       }
@@ -1036,11 +1196,19 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: const [
-                Icon(Icons.verified_user_rounded, size: 32, color: Color(0xFF1E60AA)),
+                Icon(
+                  Icons.verified_user_rounded,
+                  size: 32,
+                  color: Color(0xFF1E60AA),
+                ),
                 SizedBox(height: 12),
                 Text(
                   'You Control Every Coordinate',
-                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 18, color: Color(0xFF0F172A)),
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 18,
+                    color: Color(0xFF0F172A),
+                  ),
                 ),
                 SizedBox(height: 6),
                 Text(
@@ -1051,118 +1219,171 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
             ),
           ),
           const SizedBox(height: 16),
-          _SettingsGroup(children: [
-            ListenableBuilder(
-              listenable: Listenable.merge([
-                BackgroundLocationService.isBackgroundSharingEnabled,
-                BackgroundLocationService.state,
-              ]),
-              builder: (context, _) {
-                final bgEnabled = BackgroundLocationService.isBackgroundSharingEnabled.value;
-                // The switch shows the user's choice; the line under it shows
-                // what the service is really doing, so a failed start can never
-                // read as "Active".
-                final statusLine = bgEnabled
-                    ? BackgroundLocationService.describeState()
-                    : 'Off · Only updates while the app is on screen';
-                return SwitchListTile.adaptive(
-                  value: bgEnabled,
-                  onChanged: (val) async {
-                    if (val) {
-                      final confirmed = await ProfileScreen.showBackgroundConsentDialog(context);
-                      if (confirmed == true) {
-                        try {
-                          await BackgroundLocationService.startBackgroundTracking();
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(content: Text('Background location sharing enabled.')),
+          _SettingsGroup(
+            children: [
+              ListenableBuilder(
+                listenable: Listenable.merge([
+                  BackgroundLocationService.isBackgroundSharingEnabled,
+                  BackgroundLocationService.state,
+                ]),
+                builder: (context, _) {
+                  final bgEnabled = BackgroundLocationService
+                      .isBackgroundSharingEnabled
+                      .value;
+                  // The switch shows the user's choice; the line under it shows
+                  // what the service is really doing, so a failed start can never
+                  // read as "Active".
+                  final statusLine = bgEnabled
+                      ? BackgroundLocationService.describeState()
+                      : 'Off · Only updates while the app is on screen';
+                  return SwitchListTile.adaptive(
+                    value: bgEnabled,
+                    onChanged: (val) async {
+                      if (val) {
+                        final confirmed =
+                            await ProfileScreen.showBackgroundConsentDialog(
+                              context,
                             );
-                          }
-                        } catch (e) {
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
-                            );
+                        if (confirmed == true) {
+                          try {
+                            await BackgroundLocationService.startBackgroundTracking();
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    'Background location sharing enabled.',
+                                  ),
+                                ),
+                              );
+                            }
+                          } catch (e) {
+                            if (context.mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    e.toString().replaceFirst(
+                                      'Exception: ',
+                                      '',
+                                    ),
+                                  ),
+                                ),
+                              );
+                            }
                           }
                         }
+                      } else {
+                        await BackgroundLocationService.stopBackgroundTracking();
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Background sharing stopped.'),
+                            ),
+                          );
+                        }
                       }
-                    } else {
-                      await BackgroundLocationService.stopBackgroundTracking();
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Background sharing stopped.')),
-                        );
-                      }
-                    }
-                  },
-                  secondary: Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: (bgEnabled ? const Color(0xFF10B981) : const Color(0xFF1E60AA)).withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(12),
+                    },
+                    secondary: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color:
+                            (bgEnabled
+                                    ? const Color(0xFF10B981)
+                                    : const Color(0xFF1E60AA))
+                                .withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Icon(
+                        bgEnabled
+                            ? Icons.fmd_good_rounded
+                            : Icons.location_on_outlined,
+                        color: bgEnabled
+                            ? const Color(0xFF10B981)
+                            : const Color(0xFF1E60AA),
+                        size: 20,
+                      ),
                     ),
-                    child: Icon(
-                      bgEnabled ? Icons.fmd_good_rounded : Icons.location_on_outlined,
-                      color: bgEnabled ? const Color(0xFF10B981) : const Color(0xFF1E60AA),
-                      size: 20,
+                    title: const Text(
+                      'Background Location Sharing',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14,
+                        color: Color(0xFF0F172A),
+                      ),
                     ),
-                  ),
-                  title: const Text(
-                    'Background Location Sharing',
-                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: Color(0xFF0F172A)),
-                  ),
-                  subtitle: Text(
-                    statusLine,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: bgEnabled &&
-                              (BackgroundLocationService.state.value ==
-                                  TrackingState.failed ||
-                                  BackgroundLocationService.state.value ==
-                                      TrackingState.blockedPermission ||
-                                  BackgroundLocationService.state.value ==
-                                      TrackingState.blockedLocationServices)
-                          ? const Color(0xFFD97706)
-                          : const Color(0xFF64748B),
+                    subtitle: Text(
+                      statusLine,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color:
+                            bgEnabled &&
+                                (BackgroundLocationService.state.value ==
+                                        TrackingState.failed ||
+                                    BackgroundLocationService.state.value ==
+                                        TrackingState.blockedPermission ||
+                                    BackgroundLocationService.state.value ==
+                                        TrackingState.blockedLocationServices)
+                            ? const Color(0xFFD97706)
+                            : const Color(0xFF64748B),
+                      ),
                     ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 4,
+                    ),
+                  );
+                },
+              ),
+              const Divider(height: 1, indent: 16, endIndent: 16),
+              SwitchListTile.adaptive(
+                value: _isPaused,
+                onChanged: (_loading || _busy) ? null : _togglePause,
+                secondary: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color:
+                        (_isPaused
+                                ? const Color(0xFFD97706)
+                                : const Color(0xFF1E60AA))
+                            .withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                );
-              },
-            ),
-            const Divider(height: 1, indent: 16, endIndent: 16),
-            SwitchListTile.adaptive(
-              value: _isPaused,
-              onChanged: (_loading || _busy) ? null : _togglePause,
-              secondary: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: (_isPaused ? const Color(0xFFD97706) : const Color(0xFF1E60AA)).withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(12),
+                  child: Icon(
+                    _isPaused
+                        ? Icons.pause_circle_rounded
+                        : Icons.share_location_rounded,
+                    color: _isPaused
+                        ? const Color(0xFFD97706)
+                        : const Color(0xFF1E60AA),
+                    size: 20,
+                  ),
                 ),
-                child: Icon(
-                  _isPaused ? Icons.pause_circle_rounded : Icons.share_location_rounded,
-                  color: _isPaused ? const Color(0xFFD97706) : const Color(0xFF1E60AA),
-                  size: 20,
+                title: const Text(
+                  'Pause Sharing for Everyone',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 14,
+                    color: Color(0xFF0F172A),
+                  ),
+                ),
+                subtitle: Text(
+                  _isPaused
+                      ? 'Paused · Your location is completely hidden from all members'
+                      : 'Active · Location sharing is enabled for your circle',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: _isPaused
+                        ? const Color(0xFFD97706)
+                        : const Color(0xFF64748B),
+                    fontWeight: _isPaused ? FontWeight.w600 : FontWeight.normal,
+                  ),
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 4,
                 ),
               ),
-              title: const Text(
-                'Pause Sharing for Everyone',
-                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: Color(0xFF0F172A)),
-              ),
-              subtitle: Text(
-                _isPaused
-                    ? 'Paused · Your location is completely hidden from all members'
-                    : 'Active · Location sharing is enabled for your circle',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: _isPaused ? const Color(0xFFD97706) : const Color(0xFF64748B),
-                  fontWeight: _isPaused ? FontWeight.w600 : FontWeight.normal,
-                ),
-              ),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-            ),
-          ]),
+            ],
+          ),
           const SizedBox(height: 20),
           _sectionHeading('Who can see you'),
           if (_loadError != null)
@@ -1175,12 +1396,15 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
           else if (_members.isEmpty)
             _emptyMembersCard()
           else
-            _SettingsGroup(children: [
-              for (var i = 0; i < _members.length; i++) ...[
-                if (i > 0) const Divider(height: 1, indent: 16, endIndent: 16),
-                _memberTile(_members[i]),
+            _SettingsGroup(
+              children: [
+                for (var i = 0; i < _members.length; i++) ...[
+                  if (i > 0)
+                    const Divider(height: 1, indent: 16, endIndent: 16),
+                  _memberTile(_members[i]),
+                ],
               ],
-            ]),
+            ),
           const SizedBox(height: 16),
           Container(
             padding: const EdgeInsets.all(16),
@@ -1191,7 +1415,11 @@ class _PrivacyScreenState extends State<PrivacyScreen> {
             ),
             child: Text(
               LocationTrackingConfig.privacyCardSummary,
-              style: const TextStyle(color: Color(0xFF64748B), height: 1.45, fontSize: 13),
+              style: const TextStyle(
+                color: Color(0xFF64748B),
+                height: 1.45,
+                fontSize: 13,
+              ),
             ),
           ),
         ],
@@ -1285,61 +1513,135 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _loadError != null
-              ? ListView(
+          ? ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                Container(
                   padding: const EdgeInsets.all(16),
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFFEF2F2),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: const Color(0xFFFECACA)),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFEF2F2),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: const Color(0xFFFECACA)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.error_outline_rounded,
+                        color: Color(0xFFDC2626),
+                        size: 20,
                       ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.error_outline_rounded, color: Color(0xFFDC2626), size: 20),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              _loadError!,
-                              style: const TextStyle(color: Color(0xFFB91C1C), fontSize: 13, fontWeight: FontWeight.w600),
-                            ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          _loadError!,
+                          style: const TextStyle(
+                            color: Color(0xFFB91C1C),
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
                           ),
-                          TextButton(
-                            onPressed: _retryLoad,
-                            child: const Text('Try Again'),
-                          ),
-                        ],
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: _retryLoad,
+                        child: const Text('Try Again'),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            )
+          : ListView(
+              padding: const EdgeInsets.all(16),
+              children: [
+                const _NotificationScopeNote(),
+                const SizedBox(height: 16),
+                _SettingsGroup(
+                  children: [
+                    SwitchListTile.adaptive(
+                      value:
+                          _prefs['connection_notifications_enabled'] as bool? ??
+                          true,
+                      onChanged: _savingField == null
+                          ? (v) =>
+                                _toggle('connection_notifications_enabled', v)
+                          : null,
+                      title: const Text(
+                        'Messages & invitations',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      subtitle: const Text(
+                        'Banners for new messages and circle invitations, and push '
+                        'alerts for new messages. Messages still arrive in the chat '
+                        'when this is off.',
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 4,
+                      ),
+                    ),
+                    const Divider(height: 1, indent: 16, endIndent: 16),
+                    SwitchListTile.adaptive(
+                      value: _prefs['arrival_alerts_enabled'] as bool? ?? false,
+                      onChanged: _savingField == null
+                          ? (v) => _toggle('arrival_alerts_enabled', v)
+                          : null,
+                      title: const Text(
+                        'Arrival & Departure Alerts',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      subtitle: const Text(
+                        'Shown inside KaSpot while it is open, based on the '
+                        'places you saved.',
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 4,
                       ),
                     ),
                   ],
-                )
-              : ListView(
-                  padding: const EdgeInsets.all(16),
-                  children: [
-                    _SettingsGroup(children: [
-                      SwitchListTile.adaptive(
-                        value: _prefs['connection_notifications_enabled'] as bool? ?? true,
-                        onChanged: _savingField == null
-                            ? (v) => _toggle('connection_notifications_enabled', v)
-                            : null,
-                        title: const Text('Connection Requests', style: TextStyle(fontWeight: FontWeight.w700)),
-                        subtitle: const Text('Get notified when someone asks to connect'),
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                      ),
-                      const Divider(height: 1, indent: 16, endIndent: 16),
-                      SwitchListTile.adaptive(
-                        value: _prefs['arrival_alerts_enabled'] as bool? ?? false,
-                        onChanged: _savingField == null
-                            ? (v) => _toggle('arrival_alerts_enabled', v)
-                            : null,
-                        title: const Text('Arrival & Departure Alerts', style: TextStyle(fontWeight: FontWeight.w700)),
-                        subtitle: const Text('Optional alerts when circle members arrive'),
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                      ),
-                    ]),
-                  ],
                 ),
+              ],
+            ),
+    );
+  }
+}
+
+class _NotificationScopeNote extends StatelessWidget {
+  const _NotificationScopeNote();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: const [
+          Text(
+            'Two separate things',
+            style: TextStyle(
+              fontSize: 13.5,
+              fontWeight: FontWeight.w800,
+              color: Color(0xFF0F172A),
+            ),
+          ),
+          SizedBox(height: 6),
+          Text(
+            'These switches are KaSpot\'s own settings. Android notifications are '
+            'separate: if the system permission is off, no alert can appear even '
+            'when these are turned on.',
+            style: TextStyle(
+              fontSize: 12.5,
+              height: 1.45,
+              color: Color(0xFF64748B),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1353,7 +1655,11 @@ class _SettingsGroup extends StatelessWidget {
     return Container(
       decoration: const BoxDecoration(
         boxShadow: [
-          BoxShadow(color: Color(0x06000000), blurRadius: 10, offset: Offset(0, 3)),
+          BoxShadow(
+            color: Color(0x06000000),
+            blurRadius: 10,
+            offset: Offset(0, 3),
+          ),
         ],
       ),
       child: Material(
@@ -1399,13 +1705,21 @@ class _SettingsTile extends StatelessWidget {
       ),
       title: Text(
         title,
-        style: TextStyle(fontWeight: FontWeight.w700, fontSize: 14, color: titleColor ?? const Color(0xFF0F172A)),
+        style: TextStyle(
+          fontWeight: FontWeight.w700,
+          fontSize: 14,
+          color: titleColor ?? const Color(0xFF0F172A),
+        ),
       ),
       subtitle: Text(
         subtitle,
         style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
       ),
-      trailing: const Icon(Icons.chevron_right_rounded, color: Color(0xFF94A3B8), size: 20),
+      trailing: const Icon(
+        Icons.chevron_right_rounded,
+        color: Color(0xFF94A3B8),
+        size: 20,
+      ),
       onTap: onTap,
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
     );

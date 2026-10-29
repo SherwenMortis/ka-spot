@@ -8,7 +8,13 @@
 -- project is the only environment that exists, so these checks are prepared for
 -- review and were not executed here.
 --
---   supabase db query -f supabase/tests/location_retention.sql --linked
+--   psql "$KASPOT_STAGING_DATABASE_URL" -v ON_ERROR_STOP=1 \
+--     -f supabase/tests/location_retention.sql
+--
+-- (`supabase db query` does not exist in CLI 2.120.0 — `supabase db` only
+--  offers diff/dump/push/pull/reset/start — so psql is the supported way to run
+--  a SQL file against a linked project. Use the staging connection string from
+--  the dashboard: Database → Connection string.)
 --
 -- Everything happens inside one transaction that is rolled back at the end, so
 -- no fixture row, grant change, expiry change or purge persists. Real user ids
@@ -71,6 +77,13 @@ begin
     raise exception 'NO UNRELATED USER: the outsider case cannot be verified';
   end if;
 
+  -- Fixture writes run as the owning role, but guard_sharing_upsert() now asks
+  -- public.is_accepted_connection(), which requires a real identity: a caller
+  -- with no JWT gets false and the grant is refused. Acting as the owner keeps
+  -- the trigger's rule satisfied, exactly as the app does it.
+  perform set_config('request.jwt.claims',
+    json_build_object('role', 'authenticated', 'sub', owner::text)::text, true);
+
   -- ── 1. Fixture: an enabled grant plus a fresh location written through the
   -- normal insert path, so the retention trigger does all the stamping.
   insert into public.location_sharing (owner_id, recipient_id, is_enabled)
@@ -93,7 +106,7 @@ begin
   if recv_at is null then
     raise exception 'FAILED: the retention trigger did not stamp received_at';
   end if;
-  if abs(expires - (now() + retention)) > interval '1 minute' then
+  if abs(extract(epoch from (expires - (now() + retention)))) > 60 then
     raise exception
       'FAILED: expires_at is not one retention window from the server clock: %', expires;
   end if;
@@ -125,6 +138,9 @@ begin
     raise exception 'FAILED: an unrelated user can read someone else''s location';
   end if;
   perform set_config('role', orig_role, true);
+  -- Restore the owner identity for the fixture writes that follow.
+  perform set_config('request.jwt.claims',
+    json_build_object('role', 'authenticated', 'sub', owner::text)::text, true);
 
   -- ── 4. The purge RPC is not reachable from a client role.
   perform set_config('role', 'authenticated', true);
@@ -140,6 +156,8 @@ begin
     raise exception 'FAILED: authenticated can execute delete_expired_locations()';
   end if;
   perform set_config('role', orig_role, true);
+  perform set_config('request.jwt.claims',
+    json_build_object('role', 'authenticated', 'sub', owner::text)::text, true);
 
   -- ── 5. Past the deadline the coordinate is invisible to owner AND recipient,
   -- purely through the policy — no cleaner has to have run.
@@ -164,6 +182,8 @@ begin
     raise exception 'FAILED: a recipient still sees an expired location';
   end if;
   perform set_config('role', orig_role, true);
+  perform set_config('request.jwt.claims',
+    json_build_object('role', 'authenticated', 'sub', owner::text)::text, true);
 
   -- ── 6. A new accepted write revives visibility with a freshly stamped
   -- deadline, and the server clock owns that deadline.
@@ -187,7 +207,7 @@ begin
   if rec_at > now() then
     raise exception 'FAILED: a future client timestamp was accepted unclamped: %', rec_at;
   end if;
-  if abs(expires - (now() + retention)) > interval '1 minute' then
+  if abs(extract(epoch from (expires - (now() + retention)))) > 60 then
     raise exception 'FAILED: expiry drifted from the server clock: %', expires;
   end if;
 

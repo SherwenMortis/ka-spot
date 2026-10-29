@@ -23,6 +23,11 @@
 -- yet picked up the canonical sorted name is not locked out of its own
 -- conversation while it is still unable to reach the peer's broadcasts anyway.
 
+-- The same definitions are re-stated in supabase/schema.sql so that a database
+-- created from the canonical file alone is not left without channel
+-- authorization. Keep the two copies identical; supabase/tests/install_contract.sql
+-- asserts that both objects and both policies exist after either install path.
+--
 -- The two participant ids encoded in a conversation channel topic, or an empty
 -- array for anything that is not a conversation channel.
 create or replace function public.chat_channel_users(channel_topic text)
@@ -37,7 +42,8 @@ returns uuid[] language sql immutable security definer set search_path = '' as $
   ) parsed;
 $$;
 
-revoke all on function public.chat_channel_users(text) from public;
+revoke all on function public.chat_channel_users(text)
+  from public, anon, authenticated, service_role;
 grant execute on function public.chat_channel_users(text) to authenticated;
 
 -- True only when the caller is one of the two ids of a conversation channel
@@ -60,7 +66,8 @@ returns boolean language sql stable security definer set search_path = '' as $$
   ) subject;
 $$;
 
-revoke all on function public.is_chat_channel_participant(text) from public;
+revoke all on function public.is_chat_channel_participant(text)
+  from public, anon, authenticated, service_role;
 grant execute on function public.is_chat_channel_participant(text) to authenticated;
 
 -- Subscribe / receive: joining the channel and receiving its Broadcast events.

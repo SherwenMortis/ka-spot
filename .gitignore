@@ -55,7 +55,18 @@ app.*.map.json
 .widget_preview/
 
 # Tests & Temporary / Planning Files
-/test/
+# Contents are excluded rather than the directory itself: a trailing-slash rule
+# on `/test/` also blocks the re-inclusion below.
+/test/*
+# The privacy suite asserts published legal text, so it is kept in version
+# control next to the policy content it reviews. The account-deletion and
+# notification suites cover the flows that text makes promises about, so they
+# belong next to it for the same reason. The backend-target suite guards the
+# staging build from silently resolving to production.
+!/test/privacy_policy_ui_test.dart
+!/test/account_deletion_test.dart
+!/test/notification_privacy_test.dart
+!/test/backend_target_test.dart
 plan.md
 TODO.md
 assets/logos/preview.html

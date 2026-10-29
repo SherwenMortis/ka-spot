@@ -1,8 +1,27 @@
--- KaSpot v1. Latest location only; no historical location trail, and the one
--- stored coordinate expires on its own after the retention window below.
--- Apply using the Supabase SQL editor or Supabase CLI migrations.
--- Safe to re-run: every statement is idempotent, so applying this script to
--- an existing database upgrades it in place without resetting any data.
+-- KaSpot v1 — canonical, complete definition of the current schema.
+-- Latest location only; no historical location trail, and the one stored
+-- coordinate expires on its own after the retention window below.
+--
+-- INSTALLATION PATH — one sequence, new and existing databases alike:
+--   1. this file;
+--   2. every file in supabase/migrations/ in filename order;
+--   3. supabase/tests/install_contract.sql (structure and privilege contract).
+-- Step 2 is mandatory on an existing database and a no-op on a freshly created
+-- one, which is what lets a single documented sequence serve both. The
+-- pre-retention upgrade path (adding public.locations.received_at/expires_at to
+-- a table that already holds rows) exists only in
+-- 20261023_location_retention_expiration.sql; this file cannot reproduce it
+-- without re-introducing a volatile ADD COLUMN default that would hand every
+-- legacy row a fresh 24 hour window.
+--
+-- This file has to stay complete: a database built from it alone must end up
+-- with the same structure and privileges as one that also ran the migrations,
+-- which is what install_contract.sql asserts. Every statement is idempotent
+-- (create ... if not exists / or replace / drop policy if exists), so re-running
+-- it on an up-to-date database changes nothing.
+--
+-- supabase/STAGING.md §3 has the exact commands and the clean-install versus
+-- upgrade-path distinction.
 begin;
 
 create extension if not exists pgcrypto with schema extensions;
@@ -80,6 +99,12 @@ create table if not exists public.locations (
   expires_at timestamptz not null default (now() + public.location_retention_interval())
 );
 
+-- The purge deletes by deadline; without this index every run scans the table.
+-- Same definition as the one in 20261023_location_retention_expiration.sql, so
+-- a fresh install and an upgraded database carry the same index.
+create index if not exists locations_expires_at_idx
+  on public.locations (expires_at);
+
 create table if not exists public.saved_places (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references auth.users(id) on delete cascade,
@@ -99,14 +124,50 @@ create table if not exists public.notification_preferences (
 alter table public.notification_preferences
   add column if not exists background_sharing_enabled boolean not null default false;
 
-create or replace function public.is_accepted_connection(a uuid, b uuid)
+-- ── Internal authorization helpers ─────────────────────────────────────────
+-- The same fact is needed by two audiences: RLS policies evaluated as the
+-- signed-in caller, and trusted server code. They must not share one function,
+-- because a function reachable through the Data API cannot also be a pure fact
+-- lookup: any caller would get the truth about identifiers it is not part of.
+--
+-- kaspot_internal is deliberately not one of PostgREST's exposed schemas, and
+-- no client role holds USAGE on it or EXECUTE on these functions, so the only
+-- ways in are SECURITY DEFINER code owned by postgres and the service role.
+create schema if not exists kaspot_internal;
+revoke all on schema kaspot_internal from public, anon, authenticated;
+grant usage on schema kaspot_internal to service_role;
+
+create or replace function kaspot_internal.is_connected(a uuid, b uuid)
 returns boolean language sql stable security definer set search_path = '' as $$
   select exists (
     select 1 from public.connections c
-    where (c.user_a_id = least(a, b) and c.user_b_id = greatest(a, b))
+    where c.user_a_id = least(a, b) and c.user_b_id = greatest(a, b)
   );
 $$;
-revoke all on function public.is_accepted_connection(uuid, uuid) from public;
+
+revoke all on function kaspot_internal.is_connected(uuid, uuid)
+  from public, anon, authenticated;
+grant execute on function kaspot_internal.is_connected(uuid, uuid)
+  to service_role;
+
+-- kaspot_internal.reply_in_conversation is defined next to is_valid_reply, after
+-- circle_messages exists: a `language sql` body is validated when it is created.
+
+-- Client-facing wrapper: identity AND participation are both required. There is
+-- no `auth.uid() is null` branch — without a session this answers false, so it
+-- can never be an unauthenticated oracle. RLS policies call this one, and every
+-- policy call site passes auth.uid() as one of the arguments.
+create or replace function public.is_accepted_connection(a uuid, b uuid)
+returns boolean language sql stable security definer set search_path = '' as $$
+  select (select auth.uid()) is not null
+     and ((select auth.uid()) = a or (select auth.uid()) = b)
+     and kaspot_internal.is_connected(a, b);
+$$;
+-- Supabase's default privileges grant new public functions to anon directly, so
+-- revoking PUBLIC alone would leave anon executable: revoke every client role
+-- by name and grant only the one that needs it (migration 20261024).
+revoke all on function public.is_accepted_connection(uuid, uuid)
+  from public, anon, authenticated, service_role;
 grant execute on function public.is_accepted_connection(uuid, uuid) to authenticated;
 
 create or replace function public.guard_request_update()
@@ -322,6 +383,7 @@ create policy device_tokens_owner on public.device_tokens
   using  (user_id = (select auth.uid()))
   with check (user_id = (select auth.uid()));
 
+revoke all on public.device_tokens from anon;
 grant select, insert, update, delete on public.device_tokens to authenticated;
 
 -- In-Circle Chat Messaging between accepted circle members
@@ -351,7 +413,10 @@ using (
 -- triggering infinite recursion (an inline subquery on circle_messages inside
 -- an RLS policy on circle_messages causes a recursive policy evaluation loop).
 -- security definer bypasses RLS for this read, breaking the cycle safely.
-create or replace function public.is_valid_reply(
+--
+-- Internal fact layer (see the kaspot_internal block near the top of this file):
+-- no caller check, no client access.
+create or replace function kaspot_internal.reply_in_conversation(
   reply_id uuid,
   sender   uuid,
   recip    uuid
@@ -366,7 +431,25 @@ returns boolean language sql stable security definer set search_path = '' as $$
       )
   );
 $$;
-revoke all on function public.is_valid_reply(uuid, uuid, uuid) from public;
+revoke all on function kaspot_internal.reply_in_conversation(uuid, uuid, uuid)
+  from public, anon, authenticated;
+grant execute on function kaspot_internal.reply_in_conversation(uuid, uuid, uuid)
+  to service_role;
+
+-- Client-facing wrapper, same rule as is_accepted_connection: the caller must
+-- be a participant, and a JWT-less caller gets false rather than the truth.
+create or replace function public.is_valid_reply(
+  reply_id uuid,
+  sender   uuid,
+  recip    uuid
+)
+returns boolean language sql stable security definer set search_path = '' as $$
+  select (select auth.uid()) is not null
+     and ((select auth.uid()) = sender or (select auth.uid()) = recip)
+     and kaspot_internal.reply_in_conversation(reply_id, sender, recip);
+$$;
+revoke all on function public.is_valid_reply(uuid, uuid, uuid)
+  from public, anon, authenticated, service_role;
 grant execute on function public.is_valid_reply(uuid, uuid, uuid) to authenticated;
 
 drop policy if exists circle_messages_sender_create on public.circle_messages;
@@ -395,7 +478,85 @@ create policy circle_messages_recipient_mark_read on public.circle_messages
   using  (recipient_id = (select auth.uid()))
   with check (recipient_id = (select auth.uid()));
 
+revoke all on public.circle_messages from anon;
 grant select, insert, update on public.circle_messages to authenticated;
+
+-- ── Private Circle-chat Realtime channel authorization ─────────────────────
+-- The same definitions live in
+-- supabase/migrations/20261023_private_chat_channel_authorization.sql. Both
+-- copies are required to stay identical: this one keeps a fresh install from
+-- ending up with an unusable (and, with project-wide public access enabled,
+-- readable) conversation channel, and the migration is what upgrades a database
+-- created before the private channel existed.
+--
+-- RLS is ALREADY enabled on realtime.messages (owned by supabase_realtime_admin),
+-- so the migration deliberately contains no
+-- `alter table realtime.messages enable row level security`: that statement fails
+-- with 42501 "must be owner of table messages", aborts the transaction and
+-- silently skips every policy after it. The postgres role may still create
+-- policies on that table.
+--
+-- Authorization is derived from the topic the Realtime server reports plus the
+-- accepted-connection rule used everywhere else. Knowing the channel name is
+-- not sufficient: the two ids must hold a row in public.connections, which only
+-- the trusted request-acceptance trigger can create.
+
+-- The two participant ids encoded in a conversation channel topic, or an empty
+-- array for anything that is not a conversation channel.
+create or replace function public.chat_channel_users(channel_topic text)
+returns uuid[] language sql immutable security definer set search_path = '' as $$
+  select case
+    when t ~ '^chat-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+      then array[substring(t from 6 for 36)::uuid, substring(t from 43)::uuid]
+    else array[]::uuid[]
+  end
+  from (
+    select lower(regexp_replace(coalesce(channel_topic, ''), '^realtime:', '')) as t
+  ) parsed;
+$$;
+-- Revoked from anon by name, not only from PUBLIC: Supabase's default privileges
+-- grant new public functions to anon directly, so `revoke ... from public`
+-- alone would leave anon executable (see migration 20261024).
+revoke all on function public.chat_channel_users(text)
+  from public, anon, authenticated, service_role;
+grant execute on function public.chat_channel_users(text) to authenticated;
+
+-- True only when the caller is one of the two ids of a conversation channel
+-- whose members still hold an accepted connection.
+--
+-- The policy intentionally does not filter realtime.messages.extension: the
+-- label the Realtime server probes with has changed across server versions, and
+-- the conversation membership test is the actual security boundary.
+create or replace function public.is_chat_channel_participant(channel_topic text)
+returns boolean language sql stable security definer set search_path = '' as $$
+  select members[1] is not null
+    and members[1] <> members[2]
+    and uid = any (members)
+    and public.is_accepted_connection(members[1], members[2])
+  from (
+    select public.chat_channel_users(channel_topic) as members,
+           (select auth.uid()) as uid
+  ) subject;
+$$;
+revoke all on function public.is_chat_channel_participant(text)
+  from public, anon, authenticated, service_role;
+grant execute on function public.is_chat_channel_participant(text) to authenticated;
+
+-- Subscribe / receive: joining the channel and receiving its Broadcast events.
+drop policy if exists chat_channel_participant_receive on realtime.messages;
+create policy chat_channel_participant_receive on realtime.messages
+  for select to authenticated
+  using ( public.is_chat_channel_participant(topic) );
+
+-- Publish: sending a Broadcast event (typing start / stop) on the channel.
+drop policy if exists chat_channel_participant_publish on realtime.messages;
+create policy chat_channel_participant_publish on realtime.messages
+  for insert to authenticated
+  with check ( public.is_chat_channel_participant(topic) );
+
+-- Every other Realtime channel in this project (`kaspot-location-map-<uid>`,
+-- `kaspot-inapp-<uid>`) is Postgres-Changes only and stays public, so the
+-- project-wide "Allow public access" Realtime setting must remain enabled.
 
 -- Lookup user ID by short uppercase circle code (e.g. KS-E7BE-D662 or E7BED662)
 -- Both sides are normalised to uppercase hex so the comparison is case-insensitive.
@@ -406,7 +567,7 @@ returns uuid language sql stable security definer set search_path = '' as $$
         = upper(substring(replace(id::text, '-', '') from 1 for 8))
   limit 1;
 $$;
-revoke all on function public.lookup_user_by_code(text) from public;
+revoke all on function public.lookup_user_by_code(text) from public, anon, authenticated;
 grant execute on function public.lookup_user_by_code(text) to authenticated;
 
 -- Add public.locations, public.location_sharing, and public.circle_messages to the supabase_realtime
@@ -636,5 +797,5 @@ begin
   do update set emoji = excluded.emoji, updated_at = now();
 end;
 $$;
-revoke all on function public.upsert_reaction(uuid, text) from public;
+revoke all on function public.upsert_reaction(uuid, text) from public, anon, authenticated;
 grant execute on function public.upsert_reaction(uuid, text) to authenticated;

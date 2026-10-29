@@ -13,6 +13,7 @@ import 'services/connectivity_service.dart';
 import 'services/kaspot_service.dart';
 import 'services/notification_navigation.dart';
 import 'services/push_notification_service.dart';
+import 'utils/backend_config.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -31,19 +32,27 @@ Future<void> main() async {
   try {
     await dotenv.load(fileName: '.env');
   } catch (_) {
-    // .env is optional when building with --dart-define or CI environments
+    // .env is optional when building with --dart-define or CI environments.
+    // BackendTarget reads it only when it is actually initialised, so a missing
+    // file is "no value" rather than the throw this used to produce.
+  }
+
+  final target = BackendTarget.current();
+  final targetError = target.configurationError;
+  if (targetError != null) {
+    // A build that names one backend and points at another cannot be trusted:
+    // a staging APK aimed at production would delete real accounts. Nothing is
+    // initialised, so nothing can be sent anywhere.
+    debugPrint('KaSpot refused to start: $targetError');
+    runApp(_MisconfiguredBackendApp(message: targetError));
+    return;
   }
 
   // Initialise Firebase before anything else (required for FCM).
   await Firebase.initializeApp();
 
-  final url = dotenv.maybeGet('SUPABASE_URL') ??
-      const String.fromEnvironment('SUPABASE_URL');
-  final anonKey = dotenv.maybeGet('SUPABASE_ANON_KEY') ??
-      const String.fromEnvironment('SUPABASE_ANON_KEY');
-
-  if (url.isNotEmpty && anonKey.isNotEmpty) {
-    await Supabase.initialize(url: url, publishableKey: anonKey);
+  if (target.hasCredentials) {
+    await Supabase.initialize(url: target.url, publishableKey: target.anonKey);
     KaSpotService.configure(Supabase.instance.client);
   }
   await ConnectivityService.initialize();
@@ -253,6 +262,78 @@ class _KaSpotAppState extends State<KaSpotApp> {
         builder: (context, isAuthenticated, _) {
           return isAuthenticated ? const HomeShell() : const WelcomeScreen();
         },
+      ),
+    );
+  }
+}
+
+/// Shown instead of the app when the build's declared backend contradicts the
+/// URL it would actually use.
+///
+/// Deliberately inert: no Supabase client, no Firebase, no location services and
+/// no notification service are initialised, because each of those would make a
+/// network call against the wrong project before the user could read this. The
+/// only way out is to rebuild with a consistent target.
+class _MisconfiguredBackendApp extends StatelessWidget {
+  const _MisconfiguredBackendApp({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: Scaffold(
+        backgroundColor: KaSpotApp.slateBg,
+        body: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(28),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.report_gmailerrorred_rounded,
+                    size: 56,
+                    color: KaSpotApp.ocean,
+                  ),
+                  const SizedBox(height: 20),
+                  const Text(
+                    'This build points at the wrong KaSpot backend',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                      color: KaSpotApp.slateText,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    message,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      height: 1.5,
+                      color: KaSpotApp.mutedText,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Nothing was sent to that backend. Rebuild with '
+                    '--dart-define=KASPOT_BACKEND and a matching '
+                    '--dart-define=SUPABASE_URL.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 13,
+                      height: 1.5,
+                      color: KaSpotApp.mutedText,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }
